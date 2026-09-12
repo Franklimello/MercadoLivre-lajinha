@@ -367,11 +367,15 @@ export function Catalog({ vehicles = false }: { vehicles?: boolean }) {
                     layout
                   >
                     <AnimatePresence mode="popLayout">
-                      {data.items.map((item) =>
+                      {data.items.map((item, index) =>
                         vehicles ? (
                           <VehicleCard key={item.id} vehicle={item} />
                         ) : (
-                          <ProductCard key={item.id} product={item} />
+                          <ProductCard
+                            key={item.id}
+                            product={item}
+                            eager={index === 0}
+                          />
                         ),
                       )}
                     </AnimatePresence>

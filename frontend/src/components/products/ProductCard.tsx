@@ -16,8 +16,10 @@ export type { ProductSummary } from "@/lib/marketplace";
 export function ProductCard({
   product,
   ref,
+  eager = false,
 }: {
   product: ProductSummary;
+  eager?: boolean;
   ref?: Ref<HTMLElement>;
 }) {
   const { prepare } = useListingTransition();
@@ -58,7 +60,7 @@ export function ProductCard({
             className="listing-photo"
             transition={motionTokens.spring.smooth}
           >
-            <ListingImage src={cover?.url} alt={product.title} />
+            <ListingImage src={cover?.url} alt={product.title} eager={eager} />
           </motion.div>
         </ViewTransition>
         <p className="listing-price">{formatPrice(product.price)}</p>

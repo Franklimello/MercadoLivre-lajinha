@@ -20,20 +20,33 @@ export function subscribeApiMutations(
   };
 }
 
+export interface ApiFetchOptions extends RequestInit {
+  /** Only for public GET/HEAD endpoints; writes always retain authentication. */
+  publicRead?: boolean;
+}
+
 export async function apiFetch<T>(
   endpoint: string,
-  options: RequestInit = {},
+  options: ApiFetchOptions = {},
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options.headers as Record<string, string>),
-  };
+  const { publicRead = false, ...request } = options;
+  const method = (request.method || "GET").toUpperCase();
+  const anonymousRead = publicRead && ["GET", "HEAD"].includes(method);
+  const headers = new Headers(request.headers);
+  // Bodyless reads need no JSON content type or extra CORS preflight.
+  if (
+    request.body != null &&
+    !(request.body instanceof FormData) &&
+    !headers.has("Content-Type")
+  ) {
+    headers.set("Content-Type", "application/json");
+  }
 
   // Se o usuário estiver autenticado, injeta o token Bearer
-  if (typeof window !== "undefined" && auth.currentUser) {
+  if (!anonymousRead && typeof window !== "undefined" && auth.currentUser) {
     try {
       const token = await auth.currentUser.getIdToken();
-      headers["Authorization"] = `Bearer ${token}`;
+      headers.set("Authorization", `Bearer ${token}`);
     } catch (e) {
       console.error("Falha ao obter token do Firebase", e);
     }
@@ -42,7 +55,7 @@ export async function apiFetch<T>(
   const url = `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
   const response = await fetch(url, {
-    ...options,
+    ...request,
     // TanStack owns data freshness; never reuse an HTTP-cached API response.
     cache: "no-store",
     headers,

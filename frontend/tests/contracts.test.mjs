@@ -162,3 +162,44 @@ test("API forwards payloads and cancellation signals without changing contracts"
     globalThis.fetch = original;
   }
 });
+
+test("public catalog reads skip Firebase and JSON preflight while private reads and writes keep authentication", async () => {
+  const api = await sourceModule("../src/lib/api.ts", (source) =>
+    source.replace(
+      /import\s+\{\s*auth\s*\}\s+from\s+['"]\.\/firebase['"];?/,
+      'let tokenCalls = 0; const auth = { currentUser: { getIdToken: async () => { tokenCalls++; return "test-token"; } } }; export const getTokenCalls = () => tokenCalls;',
+    ),
+  );
+  const originalFetch = globalThis.fetch;
+  const hadWindow = Object.hasOwn(globalThis, "window");
+  const originalWindow = globalThis.window;
+  const requests = [];
+  try {
+    globalThis.window = {};
+    globalThis.fetch = async (url, options) => {
+      requests.push(options);
+      return Response.json({ ok: true });
+    };
+    await api.apiFetch("/products?page=1&limit=12", { publicRead: true });
+    assert.equal(api.getTokenCalls(), 0);
+    assert.equal(requests[0].headers.has("Authorization"), false);
+    assert.equal(requests[0].headers.has("Content-Type"), false);
+    assert.equal(Object.hasOwn(requests[0], "publicRead"), false);
+    assert.equal(requests[0].cache, "no-store");
+    await api.apiFetch("/users/me");
+    assert.equal(api.getTokenCalls(), 1);
+    assert.equal(requests[1].headers.get("Authorization"), "Bearer test-token");
+    await api.apiFetch("/products", {
+      publicRead: true,
+      method: "POST",
+      body: JSON.stringify({ title: "Test" }),
+    });
+    assert.equal(api.getTokenCalls(), 2);
+    assert.equal(requests[2].headers.get("Authorization"), "Bearer test-token");
+    assert.equal(requests[2].headers.get("Content-Type"), "application/json");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (hadWindow) globalThis.window = originalWindow;
+    else delete globalThis.window;
+  }
+});

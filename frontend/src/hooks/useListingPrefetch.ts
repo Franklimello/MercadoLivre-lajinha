@@ -31,7 +31,8 @@ export function useListingPrefetch(endpoint: string) {
         queryKey: policy.queryKey,
         staleTime: policy.staleTime,
         gcTime: policy.gcTime,
-        queryFn: ({ signal }) => apiFetch(endpoint, { signal }),
+        queryFn: ({ signal }) =>
+          apiFetch(endpoint, { signal, publicRead: !policy.private }),
       });
     }, 200);
   };

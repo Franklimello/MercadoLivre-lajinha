@@ -11,7 +11,8 @@ export function useApiResource<T>(endpoint: string | null) {
   const enabled = !!endpoint && (!policy.private || !!user);
   const query = useQuery<T, Error>({
     queryKey: policy.queryKey,
-    queryFn: ({ signal }) => apiFetch<T>(endpoint!, { signal }),
+    queryFn: ({ signal }) =>
+      apiFetch<T>(endpoint!, { signal, publicRead: !policy.private }),
     enabled,
     staleTime: policy.staleTime,
     gcTime: policy.gcTime,
