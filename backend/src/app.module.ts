@@ -9,6 +9,7 @@ import { UploadModule } from './upload/upload.module.js';
 import { ProductsModule } from './products/products.module.js';
 import { VehiclesModule } from './vehicles/vehicles.module.js';
 import { NegotiationsModule } from './negotiations/negotiations.module.js';
+import { ChatModule } from './chat/chat.module.js';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { NegotiationsModule } from './negotiations/negotiations.module.js';
     ProductsModule,
     VehiclesModule,
     NegotiationsModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],
