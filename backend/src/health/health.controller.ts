@@ -11,6 +11,11 @@ export class HealthController {
     private readonly upload: UploadService,
   ) {}
 
+  @Get()
+  health() {
+    return this.live();
+  }
+
   @Get('live')
   live() {
     return { status: 'ok' };

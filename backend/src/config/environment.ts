@@ -43,7 +43,7 @@ export function validateEnvironment(input: Record<string, unknown>) {
     }
   }
 
-  const port = Number(config.PORT || 3001);
+  const port = Number(config.PORT || 8080);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     errors.push('PORT deve ser um número inteiro entre 1 e 65535');
   }

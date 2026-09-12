@@ -23,6 +23,11 @@ describe('validateEnvironment', () => {
     expect(result.ALLOW_INSECURE_DEV_AUTH).toBe(false);
   });
 
+  it('usa 8080 quando PORT não é informada e preserva uma porta explícita', () => {
+    expect(validateEnvironment({ ...validEnvironment, PORT: undefined }).PORT).toBe(8080);
+    expect(validateEnvironment({ ...validEnvironment, PORT: '9090' }).PORT).toBe(9090);
+  });
+
   it('recusa placeholders de serviços externos', () => {
     expect(() =>
       validateEnvironment({ ...validEnvironment, DATABASE_URL: 'postgresql://user:pass@ep-xyz/db' }),

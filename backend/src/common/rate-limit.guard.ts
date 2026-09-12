@@ -29,7 +29,7 @@ export class RateLimitGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
     const response = context.switchToHttp().getResponse<Response>();
-    if (request.path === '/health/live') return true;
+    if (request.path === '/health' || request.path === '/health/live') return true;
 
     const now = Date.now();
     const key = request.ip || request.socket.remoteAddress || 'unknown';

@@ -6,6 +6,7 @@ import { vi } from 'vitest';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
+  let databaseCheck: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     Object.assign(process.env, {
@@ -29,6 +30,7 @@ describe('AppController (e2e)', () => {
         import('./../src/firebase/firebase-admin.service.js'),
         import('./../src/upload/upload.service.js'),
       ]);
+    databaseCheck = vi.fn().mockResolvedValue([{ '?column?': 1 }]);
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
@@ -36,7 +38,7 @@ describe('AppController (e2e)', () => {
       .useValue({
         $connect: vi.fn(),
         $disconnect: vi.fn(),
-        $queryRaw: vi.fn().mockResolvedValue([{ '?column?': 1 }]),
+        $queryRaw: databaseCheck,
       })
       .overrideProvider(FirebaseAdminService)
       .useValue({ isReady: () => true, verifyIdToken: vi.fn() })
@@ -49,6 +51,14 @@ describe('AppController (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
     );
     await app.init();
+  });
+
+  it('/health responde sem consultar o banco mesmo quando ele está indisponível', async () => {
+    databaseCheck.mockRejectedValue(new Error('offline'));
+    await request(app.getHttpServer()).get('/health').expect(200).expect({ status: 'ok' });
+    expect(databaseCheck).not.toHaveBeenCalled();
+    await request(app.getHttpServer()).get('/health/live').expect(200).expect({ status: 'ok' });
+    await request(app.getHttpServer()).get('/health/ready').expect(503);
   });
 
   it('/health/ready (GET)', () => {
