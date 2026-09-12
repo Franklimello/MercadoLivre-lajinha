@@ -226,6 +226,17 @@
     width: 229px;
     height: 40px;
   }
+  .brand-mobile-title {
+    color: var(--primary);
+    font-size: 19px;
+    font-weight: 750;
+    letter-spacing: -0.7px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .brand-mobile-title span {
+    font-weight: 550;
+  }
   .header-actions {
     margin-left: auto;
     display: flex;
@@ -909,14 +920,15 @@
   .management-actions {
     grid-column: 2;
   }
-  .brand-icon {
+}
+@media (min-width: 768px) {
+  .brand-icon,
+  .brand-mobile-title {
     display: none;
   }
   .brand-logo {
     display: block;
   }
-}
-@media (min-width: 768px) {
   :root {
     --header-height: 126px;
     --bottom-nav-height: 0px;

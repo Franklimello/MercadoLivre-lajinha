@@ -1,46 +1,82 @@
 "use client";
-import { useState } from "react";
-import { usePathname } from "next/navigation";
-import { Bell, X } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
+import { useState, useSyncExternalStore } from "react";
+import { BellRing } from "lucide-react";
+import { motion } from "motion/react";
 import { useFcm } from "@/hooks/useFcm";
+import {
+  dismissNotificationPrompt,
+  isNotificationPromptDismissed,
+  subscribeNotificationPermission,
+} from "@/lib/notification-permission";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 export function PushNotificationBanner() {
-  const { user } = useAuth();
-  const pathname = usePathname();
-  const { notificationsEnabled, requestPermissionAndRegister, loading } =
-    useFcm();
+  const { requestPermissionAndRegister, permission, loading } = useFcm(true);
   const [dismissed, setDismissed] = useState(false);
-  if (
-    !user ||
-    notificationsEnabled ||
-    dismissed ||
-    pathname === "/conta" ||
-    pathname === "/anunciar" ||
-    pathname === "/veiculos/novo" ||
-    pathname.startsWith("/negociacoes/")
-  )
-    return null;
+  const sessionDismissed = useSyncExternalStore(
+    subscribeNotificationPermission,
+    isNotificationPromptDismissed,
+    () => true,
+  );
+  const open = permission === "default" && !dismissed && !sessionDismissed;
+  function dismiss() {
+    setDismissed(true);
+    dismissNotificationPrompt();
+  }
   return (
-    <div className="notice-bar">
-      <div className="shell flex flex-wrap items-center gap-3 !px-0">
-        <Bell size={17} className="shrink-0" />
-        <p className="flex-1">Receba um aviso quando alguém mandar mensagem.</p>
-        <Button
-          variant="ghost"
-          disabled={loading}
-          onClick={requestPermissionAndRegister}
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && !loading) dismiss();
+      }}
+    >
+      <DialogContent className="!w-[calc(100%-2rem)] !max-w-sm !rounded-3xl !p-7 max-h-[calc(100dvh-2rem)] overflow-y-auto">
+        <motion.div
+          initial={{ scale: 0.85 }}
+          animate={{ scale: 1 }}
+          className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary"
         >
-          {loading ? "Ativando…" : "Ativar avisos"}
-        </Button>
-        <button
-          className="icon-button"
-          aria-label="Dispensar aviso"
-          onClick={() => setDismissed(true)}
-        >
-          <X size={17} />
-        </button>
-      </div>
-    </div>
+          <BellRing size={26} strokeWidth={1.7} />
+        </motion.div>
+        <DialogHeader>
+          <DialogTitle className="text-xl font-semibold tracking-tight">
+            Não perca uma boa conversa
+          </DialogTitle>
+          <DialogDescription className="leading-relaxed">
+            Permita notificações do ML Lajinha para saber quando alguém enviar
+            uma mensagem sobre seus anúncios.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-1 grid gap-2">
+          <Button
+            disabled={loading}
+            className="h-11 rounded-xl"
+            onClick={async () => {
+              await requestPermissionAndRegister();
+              dismiss();
+            }}
+          >
+            {loading ? "Ativando…" : "Permitir notificações"}
+          </Button>
+          <Button
+            disabled={loading}
+            variant="ghost"
+            className="h-10 rounded-xl"
+            onClick={dismiss}
+          >
+            Agora não
+          </Button>
+        </div>
+        <p className="text-center text-xs text-muted-foreground">
+          Você pode alterar sua escolha nas configurações do navegador.
+        </p>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -103,10 +103,14 @@ Build e execução Docker, também de `backend/`:
 
 ```powershell
 docker build --platform linux/amd64 -t mercado-lajinha-api:cloudrun .
-docker run --rm --name mercado-lajinha-api -p 8080:8080 --env-file .env -e NODE_ENV=production -e PORT=8080 mercado-lajinha-api:cloudrun
+npm run docker:local
 ```
 
-Envie somente variáveis no `.env`, em uma linha por valor, sem export ou substituições de shell. Não coloque o arquivo na imagem. Para testar porta alternativa, use `-p 9090:9090 -e PORT=9090`. Encerre com Ctrl+C ou `docker stop mercado-lajinha-api` para conferir shutdown gracioso.
+O comando lê `.env` com dotenv e passa as variáveis ao Docker por nome, preservando aspas e quebras de linha da chave Firebase corretamente, sem incluir credenciais nos argumentos do processo. Não coloque o arquivo na imagem. Encerre com Ctrl+C ou `docker stop mercado-lajinha-api` para conferir shutdown gracioso.
+
+Antes de iniciar, execute `npm run env:check` para validar formatos e consultar Neon, Firebase e ImageKit sem modificar dados. O comando também verifica a configuração local do frontend; uma API desligada fará o health check falhar. Ele não realiza uploads nem envia notificações.
+
+No `.env` lido pelo NestJS, aspas externas são opcionais para valores simples. Para `FIREBASE_PRIVATE_KEY`, mantenha aspas duplas e `\n` entre as linhas. Já `docker run --env-file` não remove aspas externas: use o comando acima com esse arquivo. Nos campos da Vercel, Cloud Run e Secret Manager, cole apenas o valor, sem aspas externas. Reinicie a aplicação após modificar variáveis locais; variáveis `NEXT_PUBLIC_*` precisam de novo build para alterar o frontend em produção.
 
 Migrações são uma etapa manual separada, com `DIRECT_URL` configurada e dependências de desenvolvimento disponíveis no checkout:
 

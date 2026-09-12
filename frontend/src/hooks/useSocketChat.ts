@@ -1,149 +1,225 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { io, type Socket } from "socket.io-client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useChatInbox } from "@/contexts/ChatContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { auth } from "@/lib/firebase";
-import { useApiResource } from "./useApiResource";
-export interface ChatMessage {
-  id: string;
-  negotiationId: string;
-  senderId: string;
-  content: string;
-  createdAt: string;
-  sender: { id: string; name: string; avatarUrl: string | null };
-}
+import { apiFetch } from "@/lib/api";
+import { resourcePolicy } from "@/lib/query-keys";
+import {
+  appendChatMessage,
+  applyReadReceipt,
+  mergeChatMessages,
+  type ChatMessage,
+} from "@/lib/chat-cache";
+export type { ChatMessage } from "@/lib/chat-cache";
+const emptyMessages: ChatMessage[] = [];
+
 export function useSocketChat(negotiationId: string) {
-  const history = useApiResource<ChatMessage[]>(
-    `/negotiations/${negotiationId}/messages`,
+  const { user, firebaseUser } = useAuth();
+  const { socket, connected: online, getRecentMessages } = useChatInbox();
+  const queryClient = useQueryClient();
+  const historyKey = useMemo(
+    () =>
+      resourcePolicy(
+        `/negotiations/${negotiationId}/messages`,
+        firebaseUser?.uid,
+      ).queryKey,
+    [negotiationId, firebaseUser?.uid],
   );
-  const reloadHistory = history.reload;
-  const [incoming, setIncoming] = useState<{
+  const history = useQuery<ChatMessage[]>({
+    queryKey: historyKey,
+    queryFn: async ({ signal }) => {
+      const snapshot = await apiFetch<ChatMessage[]>(
+        `/negotiations/${negotiationId}/messages`,
+        { signal },
+      );
+      return mergeChatMessages(snapshot, getRecentMessages(negotiationId));
+    },
+    enabled: !!user && !!firebaseUser,
+    staleTime: 15_000,
+    gcTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+  const refetch = history.refetch;
+  const reloadHistory = useCallback(() => {
+    void refetch({ cancelRefetch: false });
+  }, [refetch]);
+  const messages = history.data || emptyMessages;
+  const [joined, setJoined] = useState<{
     room: string;
-    items: ChatMessage[];
-  }>({ room: "", items: [] });
-  const [connection, setConnection] = useState<{
-    room: string;
-    ready: boolean;
-  }>({ room: "", ready: false });
+    socketId: string;
+  } | null>(null);
   const [revision, setRevision] = useState(0);
-  const socketRef = useRef<Socket | null>(null);
+  const hasJoined = useRef(new Set<string>());
+  const pendingRead = useRef(false);
+  const connected =
+    online && joined?.room === negotiationId && joined.socketId === socket?.id;
+
   useEffect(() => {
+    if (!socket || !online) return;
     let disposed = false;
-    let socket: Socket | undefined;
-    let joinTimer: ReturnType<typeof setTimeout> | undefined;
-    async function setup() {
-      if (!auth.currentUser) return;
-      const token = await auth.currentUser.getIdToken();
-      if (disposed) return;
-      socket = io(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"}/chat`,
-        { auth: { token }, transports: ["websocket", "polling"] },
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const join = () => {
+      if (disposed || !socket.connected) return;
+      socket
+        .timeout(5000)
+        .emit(
+          "joinNegotiation",
+          { negotiationId },
+          (error: Error | null, result?: { status: string }) => {
+            if (disposed) return;
+            if (!error && result?.status === "joined" && socket.id) {
+              setJoined({ room: negotiationId, socketId: socket.id });
+              // Initial HTTP history loads in parallel. Refetch only to recover gaps.
+              if (hasJoined.current.has(negotiationId)) reloadHistory();
+              hasJoined.current.add(negotiationId);
+            } else if (result?.status !== "forbidden" && ++attempts < 3) {
+              retryTimer = setTimeout(join, 600);
+            }
+          },
+        );
+    };
+    const receive = (message: ChatMessage) => {
+      if (message.negotiationId !== negotiationId || !firebaseUser) return;
+      const key = resourcePolicy(
+        `/negotiations/${negotiationId}/messages`,
+        firebaseUser.uid,
+      ).queryKey;
+      queryClient.setQueryData<ChatMessage[]>(key, (items) =>
+        items ? appendChatMessage(items, message) : undefined,
       );
-      socketRef.current = socket;
-      socket.on("connect", () => {
-        let attempts = 0;
-        const join = () => {
-          if (disposed || !socket?.connected) return;
-          socket
-            .timeout(5000)
-            .emit(
-              "joinNegotiation",
-              { negotiationId },
-              (error: Error | null, result?: { status: string }) => {
-                if (disposed) return;
-                if (!error && result?.status === "joined") {
-                  setConnection({ room: negotiationId, ready: true });
-                  reloadHistory();
-                } else if (++attempts < 3) {
-                  joinTimer = setTimeout(join, 1000);
-                }
-              },
-            );
-        };
-        join();
-      });
-      socket.on("disconnect", () =>
-        setConnection({ room: negotiationId, ready: false }),
-      );
-      socket.on("connect_error", () =>
-        setConnection({ room: negotiationId, ready: false }),
-      );
-      socket.on("newMessage", (message: ChatMessage) => {
-        if (message.negotiationId !== negotiationId) return;
-        setIncoming((prev) => {
-          const items = prev.room === negotiationId ? prev.items : [];
-          return {
-            room: negotiationId,
-            items: items.some((m) => m.id === message.id)
-              ? items
-              : [...items, message],
-          };
-        });
-      });
-    }
-    setup().catch(() => {
-      if (!disposed) setConnection({ room: negotiationId, ready: false });
-    });
+    };
+    socket.on("newMessage", receive);
+    join();
     return () => {
       disposed = true;
-      clearTimeout(joinTimer);
-      socket?.disconnect();
-      socketRef.current = null;
+      clearTimeout(retryTimer);
+      socket.off("newMessage", receive);
+      if (socket.connected) socket.emit("leaveNegotiation", { negotiationId });
     };
-  }, [negotiationId, revision, reloadHistory]);
-  const connected = connection.room === negotiationId && connection.ready;
+  }, [
+    socket,
+    online,
+    negotiationId,
+    revision,
+    reloadHistory,
+    queryClient,
+    firebaseUser,
+  ]);
+
   async function sendMessage(content: string): Promise<void> {
-    if (!content.trim() || !socketRef.current?.connected || !connected)
+    if (!content.trim() || !socket?.connected || !connected)
       throw new Error("A conversa está desconectada. Reconecte para enviar.");
     return new Promise((resolve, reject) => {
-      socketRef
-        .current!.timeout(10000)
+      socket
+        .timeout(10000)
         .emit(
           "sendMessage",
           { negotiationId, content: content.trim() },
           (
             error: Error | null,
-            result?: { status: string; message?: string },
+            result?: { status: string; message?: ChatMessage | string },
           ) => {
-            if (error) {
-              reject(
+            if (error)
+              return reject(
                 new Error(
                   "O envio não foi confirmado. Confira a conversa antes de tentar novamente.",
                 ),
               );
-              return;
-            }
-            if (result?.status !== "sent") {
-              reject(
+            if (result?.status !== "sent")
+              return reject(
                 new Error(
-                  result?.message || "Não foi possível enviar a mensagem.",
+                  typeof result?.message === "string"
+                    ? result.message
+                    : "Não foi possível enviar a mensagem.",
                 ),
               );
-              return;
+            // The persisted acknowledgement covers a missed broadcast without duplicates.
+            if (
+              result.message &&
+              typeof result.message !== "string" &&
+              firebaseUser &&
+              auth.currentUser?.uid === firebaseUser.uid
+            ) {
+              const key = resourcePolicy(
+                `/negotiations/${negotiationId}/messages`,
+                firebaseUser.uid,
+              ).queryKey;
+              queryClient.setQueryData<ChatMessage[]>(key, (items) =>
+                items
+                  ? appendChatMessage(items, result.message as ChatMessage)
+                  : undefined,
+              );
             }
             resolve();
           },
         );
     });
   }
-  const combined = [
-    ...(history.data || []),
-    ...(incoming.room === negotiationId ? incoming.items : []),
-  ];
-  const messages = Array.from(
-    new Map(combined.map((m) => [m.id, m])).values(),
-  ).sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  const markRead = useCallback(
+    async (
+      canRead: () => boolean = () =>
+        document.visibilityState === "visible" && document.hasFocus(),
+    ) => {
+      if (!user || !firebaseUser || pendingRead.current || !canRead()) return;
+      pendingRead.current = true;
+      let changed = false;
+      try {
+        // Read the current cache again after each request so messages arriving
+        // during the request are acknowledged only while the conversation is visible.
+        for (let batch = 0; batch < 10 && canRead(); batch++) {
+          if (auth.currentUser?.uid !== firebaseUser.uid) break;
+          const items =
+            queryClient.getQueryData<ChatMessage[]>(historyKey) || [];
+          const ids = items
+            .filter(
+              (message) => message.senderId !== user.id && !message.readAt,
+            )
+            .map((message) => message.id);
+          if (!ids.length) break;
+          const receipt = await apiFetch<{
+            readAt: string;
+            messageIds: string[];
+          }>(`/negotiations/${negotiationId}/messages/read`, {
+            method: "PATCH",
+            body: JSON.stringify({ messageIds: ids }),
+          });
+          if (auth.currentUser?.uid !== firebaseUser.uid) break;
+          queryClient.setQueryData<ChatMessage[]>(historyKey, (current) =>
+            current
+              ? applyReadReceipt(current, receipt.messageIds, receipt.readAt)
+              : undefined,
+          );
+          changed = true;
+        }
+      } catch {
+        /* Keep unread messages intact when offline; retry on focus/next message. */
+      } finally {
+        pendingRead.current = false;
+        if (changed)
+          void queryClient.invalidateQueries({
+            queryKey: resourcePolicy("/negotiations/unread", firebaseUser.uid)
+              .queryKey,
+            exact: true,
+          });
+      }
+    },
+    [user, firebaseUser, historyKey, negotiationId, queryClient],
   );
+
   return {
     messages,
-    loading: history.loading,
-    error: history.error,
-    reload: history.reload,
+    loading: history.isPending,
+    error: history.data ? null : history.error,
+    reload: reloadHistory,
     connected,
     sendMessage,
+    markRead,
     reconnect: () => {
-      setConnection({ room: negotiationId, ready: false });
-      setRevision((v) => v + 1);
+      if (socket && !socket.connected) socket.connect();
+      setRevision((value) => value + 1);
     },
   };
 }

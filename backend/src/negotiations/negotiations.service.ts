@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
-import { CreateNegotiationDto, UpdateNegotiationStatusDto } from './dto/negotiation.dto.js';
+import {
+  CreateNegotiationDto,
+  UpdateNegotiationStatusDto,
+} from './dto/negotiation.dto.js';
 import { NegotiationStatus, ProductStatus, Prisma } from '@prisma/client';
 
 @Injectable()
@@ -28,11 +31,15 @@ export class NegotiationsService {
     }
 
     if (product.sellerId === buyerId) {
-      throw new BadRequestException('Você não pode iniciar uma negociação no seu próprio anúncio.');
+      throw new BadRequestException(
+        'Você não pode iniciar uma negociação no seu próprio anúncio.',
+      );
     }
 
     if (product.status !== ProductStatus.ACTIVE || product.stock <= 0) {
-      throw new BadRequestException('Este anúncio não está mais disponível para novas negociações.');
+      throw new BadRequestException(
+        'Este anúncio não está mais disponível para novas negociações.',
+      );
     }
 
     // Busca negociação existente entre este comprador e este produto
@@ -70,7 +77,9 @@ export class NegotiationsService {
         }
       }
 
-      const buyer = await this.prisma.user.findUnique({ where: { id: buyerId } });
+      const buyer = await this.prisma.user.findUnique({
+        where: { id: buyerId },
+      });
       if (buyer) {
         await this.notificationsService.notifyNewNegotiation(
           product.sellerId,
@@ -128,6 +137,25 @@ export class NegotiationsService {
     });
   }
 
+  async getUnreadSummary(userId: string) {
+    const groups = await this.prisma.message.groupBy({
+      by: ['negotiationId'],
+      where: {
+        readAt: null,
+        senderId: { not: userId },
+        negotiation: { OR: [{ buyerId: userId }, { sellerId: userId }] },
+      },
+      _count: { _all: true },
+    });
+    return {
+      total: groups.reduce((total, group) => total + group._count._all, 0),
+      conversations: groups.map((group) => ({
+        id: group.negotiationId,
+        count: group._count._all,
+      })),
+    };
+  }
+
   async findOne(userId: string, id: string) {
     const negotiation = await this.prisma.negotiation.findUnique({
       where: { id },
@@ -161,13 +189,19 @@ export class NegotiationsService {
 
     // Valida participação
     if (negotiation.buyerId !== userId && negotiation.sellerId !== userId) {
-      throw new ForbiddenException('Você não tem permissão para acessar esta negociação.');
+      throw new ForbiddenException(
+        'Você não tem permissão para acessar esta negociação.',
+      );
     }
 
     return negotiation;
   }
 
-  async updateStatus(userId: string, id: string, dto: UpdateNegotiationStatusDto) {
+  async updateStatus(
+    userId: string,
+    id: string,
+    dto: UpdateNegotiationStatusDto,
+  ) {
     const result = await this.prisma.$transaction(async (tx) => {
       const negotiation = await tx.negotiation.findUnique({
         where: { id },
@@ -178,7 +212,9 @@ export class NegotiationsService {
         throw new NotFoundException('Negociação não encontrada.');
       }
       if (negotiation.buyerId !== userId && negotiation.sellerId !== userId) {
-        throw new ForbiddenException('Você não tem permissão para alterar esta negociação.');
+        throw new ForbiddenException(
+          'Você não tem permissão para alterar esta negociação.',
+        );
       }
 
       const sellerAction = negotiation.sellerId === userId;
@@ -187,7 +223,9 @@ export class NegotiationsService {
         : this.buyerTransitions(negotiation.status);
 
       if (dto.status !== negotiation.status && !allowed.includes(dto.status)) {
-        throw new BadRequestException('Transição de status inválida para esta negociação.');
+        throw new BadRequestException(
+          'Transição de status inválida para esta negociação.',
+        );
       }
 
       const updated =
@@ -209,7 +247,9 @@ export class NegotiationsService {
         });
 
         if (sold.count !== 1) {
-          throw new ConflictException('Este anúncio já não está disponível para conclusão.');
+          throw new ConflictException(
+            'Este anúncio já não está disponível para conclusão.',
+          );
         }
 
         await tx.negotiation.updateMany({

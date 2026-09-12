@@ -17,6 +17,7 @@ export class ChatService {
   async getMessages(userId: string, negotiationId: string) {
     const negotiation = await this.prisma.negotiation.findUnique({
       where: { id: negotiationId },
+      select: { buyerId: true, sellerId: true },
     });
 
     if (!negotiation) {
@@ -27,19 +28,9 @@ export class ChatService {
       throw new ForbiddenException('Você não participa desta negociação.');
     }
 
-    // Marca mensagens não lidas como lidas
-    await this.prisma.message.updateMany({
-      where: {
-        negotiationId,
-        senderId: { not: userId },
-        readAt: null,
-      },
-      data: { readAt: new Date() },
-    });
-
     const messages = await this.prisma.message.findMany({
       where: { negotiationId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 200,
       include: {
         sender: {
@@ -63,10 +54,10 @@ export class ChatService {
 
     const negotiation = await this.prisma.negotiation.findUnique({
       where: { id: negotiationId },
-      include: {
+      select: {
+        buyerId: true,
+        sellerId: true,
         product: { select: { title: true } },
-        buyer: { select: { id: true, name: true } },
-        seller: { select: { id: true, name: true } },
       },
     });
 
@@ -75,28 +66,30 @@ export class ChatService {
     }
 
     if (negotiation.buyerId !== senderId && negotiation.sellerId !== senderId) {
-      throw new ForbiddenException('Apenas participantes podem enviar mensagens.');
+      throw new ForbiddenException(
+        'Apenas participantes podem enviar mensagens.',
+      );
     }
 
-    // Salva mensagem no PostgreSQL
-    const message = await this.prisma.message.create({
-      data: {
-        negotiationId,
-        senderId,
-        content: normalizedContent,
-      },
-      include: {
-        sender: {
-          select: { id: true, name: true, avatarUrl: true },
+    // Keep the message and conversation timestamp consistent in one transaction.
+    const [message] = await this.prisma.$transaction([
+      this.prisma.message.create({
+        data: {
+          negotiationId,
+          senderId,
+          content: normalizedContent,
         },
-      },
-    });
-
-    // Atualiza updatedAt da negociação
-    await this.prisma.negotiation.update({
-      where: { id: negotiationId },
-      data: { updatedAt: new Date() },
-    });
+        include: {
+          sender: {
+            select: { id: true, name: true, avatarUrl: true },
+          },
+        },
+      }),
+      this.prisma.negotiation.update({
+        where: { id: negotiationId },
+        data: { updatedAt: new Date() },
+      }),
+    ]);
 
     // Identifica o destinatário para push notification
     const recipientId =
@@ -104,10 +97,7 @@ export class ChatService {
         ? negotiation.sellerId
         : negotiation.buyerId;
 
-    const senderName =
-      negotiation.buyerId === senderId
-        ? negotiation.buyer.name
-        : negotiation.seller.name;
+    const senderName = message.sender.name;
 
     // Dispara notificação push em segundo plano se houver tokens FCM
     void this.sendPushToRecipient(
@@ -118,7 +108,34 @@ export class ChatService {
       negotiation.product.title,
     );
 
-    return message;
+    return { message, recipientId };
+  }
+
+  async markMessagesRead(
+    userId: string,
+    negotiationId: string,
+    messageIds: string[],
+  ) {
+    const negotiation = await this.prisma.negotiation.findUnique({
+      where: { id: negotiationId },
+      select: { buyerId: true, sellerId: true },
+    });
+    if (!negotiation) throw new NotFoundException('Negociação não encontrada.');
+    if (negotiation.buyerId !== userId && negotiation.sellerId !== userId) {
+      throw new ForbiddenException('Você não participa desta negociação.');
+    }
+    const readAt = new Date();
+    // Mark only the messages actually displayed, never newer unseen messages.
+    const result = await this.prisma.message.updateMany({
+      where: {
+        negotiationId,
+        id: { in: messageIds },
+        senderId: { not: userId },
+        readAt: null,
+      },
+      data: { readAt },
+    });
+    return { count: result.count, readAt, messageIds };
   }
 
   private async sendPushToRecipient(

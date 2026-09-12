@@ -35,6 +35,11 @@ export class NegotiationsController {
     return this.negotiationsService.findAllForUser(user.id, role);
   }
 
+  @Get('unread')
+  unread(@CurrentUser() user: User) {
+    return this.negotiationsService.getUnreadSummary(user.id);
+  }
+
   @Get(':id')
   findOne(@CurrentUser() user: User, @Param('id') id: string) {
     return this.negotiationsService.findOne(user.id, id);

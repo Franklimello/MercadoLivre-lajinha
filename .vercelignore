@@ -1,0 +1,21 @@
+# Publish only the frontend; the API is hosted separately on Cloud Run.
+backend/
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+dist/
+**/dist/
+coverage/
+**/coverage/
+.git/
+.neon/
+.env*
+**/.env*
+*.pem
+**/*.pem
+*.key
+**/*.key
+**/*service-account*.json
+**/*credentials*.json
+npm-debug.log*

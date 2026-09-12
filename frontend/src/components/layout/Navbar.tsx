@@ -14,6 +14,8 @@ import {
   LogOut,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useChatInbox } from "@/contexts/ChatContext";
+import { UnreadBadge } from "@/components/chat/UnreadBadge";
 import { buttonVariants } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -148,6 +150,10 @@ function HeaderSearch() {
 
 export function Navbar() {
   const { user, loading, signOut } = useAuth();
+  const { unread } = useChatInbox();
+  const messagesLabel = unread.total
+    ? `Mensagens, ${unread.total} não lidas`
+    : "Mensagens";
   const pathname = usePathname();
   const router = useRouter();
   const chat = /^\/negociacoes\/.+/.test(pathname);
@@ -186,6 +192,9 @@ export function Navbar() {
               className="brand-icon"
               priority
             />
+            <span className="brand-mobile-title" aria-hidden="true">
+              ML <span>Lajinha</span>
+            </span>
             <Image
               src="/brand/logo.svg"
               width={229}
@@ -203,10 +212,11 @@ export function Navbar() {
           <div className="header-actions">
             <Link
               href="/negociacoes"
-              className="hidden lg:inline-flex icon-button"
-              aria-label="Mensagens"
+              className="hidden lg:inline-flex icon-button relative"
+              aria-label={messagesLabel}
             >
               <MessageSquare size={21} />
+              <UnreadBadge count={unread.total} />
             </Link>
             {loading ? (
               <div
@@ -328,6 +338,7 @@ export function Navbar() {
               key={href}
               href={href}
               aria-current={isActive(href) ? "page" : undefined}
+              aria-label={href === "/negociacoes" ? messagesLabel : undefined}
               className={href === "/anunciar" ? "nav-publish" : ""}
             >
               {isActive(href) && (
@@ -349,7 +360,12 @@ export function Navbar() {
                 }
                 transition={motionTokens.spring.snappy}
               >
-                <Icon size={21} strokeWidth={1.7} aria-hidden="true" />
+                <span className="relative inline-flex">
+                  <Icon size={21} strokeWidth={1.7} aria-hidden="true" />
+                  {href === "/negociacoes" && (
+                    <UnreadBadge count={unread.total} />
+                  )}
+                </span>
                 <span>{label}</span>
               </motion.span>
             </Link>

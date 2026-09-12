@@ -2,6 +2,7 @@ import 'dotenv/config';
 import {
   ConnectedSocket,
   MessageBody,
+  OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
@@ -23,7 +24,9 @@ import { JoinNegotiationDto, SendMessageDto } from './dto/chat-message.dto.js';
   },
   namespace: '/chat',
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server!: Server;
 
@@ -36,35 +39,44 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly prisma: PrismaService,
   ) {}
 
-  async handleConnection(client: Socket) {
-    try {
-      const token =
-        client.handshake.auth?.token ||
-        client.handshake.headers?.authorization?.replace('Bearer ', '');
+  afterInit(server: Server) {
+    // Complete authentication before Socket.IO emits connect or accepts room joins.
+    server.use((client, next) => {
+      this.authenticate(client).then(
+        () => next(),
+        () => next(new Error('Não autorizado.')),
+      );
+    });
+  }
 
-      if (!token) {
-        this.logger.warn(`Client ${client.id} disconnected: No token provided.`);
-        client.disconnect();
-        return;
-      }
+  private async authenticate(client: Socket) {
+    const token = client.handshake.auth?.token || client.handshake.headers?.authorization?.replace('Bearer ', '');
+    if (typeof token !== 'string' || !token) throw new Error('Missing token');
+    const decoded = await this.firebaseAdmin.verifyIdToken(token);
+    const user = await this.prisma.user.findUnique({
+      where: { firebaseUid: decoded.uid },
+      select: { id: true, name: true, firebaseUid: true },
+    });
+    if (!user) throw new Error('User unavailable');
+    client.data.user = user;
+  }
 
-      const decoded = await this.firebaseAdmin.verifyIdToken(token);
-      const user = await this.prisma.user.findUnique({
-        where: { firebaseUid: decoded.uid },
-      });
-
-      if (!user) {
-        this.logger.warn(`Client ${client.id} disconnected: User not found.`);
-        client.disconnect();
-        return;
-      }
-
-      client.data.user = user;
-      this.logger.log(`Client connected: ${user.name} (${client.id})`);
-    } catch (error) {
-      this.logger.error(`Auth error on socket connection: ${client.id}`, error);
+  handleConnection(client: Socket) {
+    if (!client.data.user) {
       client.disconnect();
+      return;
     }
+    void client.join(`user_${client.data.user.id}`);
+  }
+
+  notifyMessagesRead(
+    userId: string,
+    negotiationId: string,
+    receipt: { readAt: Date; messageIds: string[] },
+  ) {
+    this.server
+      .to(`user_${userId}`)
+      .emit('messagesRead', { negotiationId, ...receipt });
   }
 
   handleDisconnect(client: Socket) {
@@ -90,12 +102,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       (negotiation.buyerId === user.id || negotiation.sellerId === user.id)
     ) {
       const room = `negotiation_${data.negotiationId}`;
-      client.join(room);
+      await client.join(room);
       this.logger.log(`User ${user.name} joined room ${room}`);
       return { status: 'joined', room };
     } else {
       return { status: 'forbidden' };
     }
+  }
+
+  @SubscribeMessage('leaveNegotiation')
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  async handleLeave(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: JoinNegotiationDto,
+  ) {
+    if (!client.data.user) return;
+    await client.leave(`negotiation_${data.negotiationId}`);
+    return { status: 'left' };
   }
 
   @SubscribeMessage('sendMessage')
@@ -114,25 +137,32 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!user || !data.negotiationId || !data.content?.trim()) return;
 
     if (!this.consumeMessageQuota(client.id)) {
-      return { status: 'error', message: 'Muitas mensagens. Aguarde alguns segundos.' };
+      return {
+        status: 'error',
+        message: 'Muitas mensagens. Aguarde alguns segundos.',
+      };
     }
 
     try {
-      // 1. Salva no banco e notifica push se necessário
-      const message = await this.chatService.saveAndNotifyMessage(
-        user.id,
-        data.negotiationId,
-        data.content.trim(),
-      );
-
-      // 2. Transmite via WebSocket em tempo real para todos na sala
+      const { message, recipientId } =
+        await this.chatService.saveAndNotifyMessage(
+          user.id,
+          data.negotiationId,
+          data.content.trim(),
+        );
       const room = `negotiation_${data.negotiationId}`;
       this.server.to(room).emit('newMessage', message);
-
-      return { status: 'sent', messageId: message.id };
+      // A private user room delivers updates outside the open conversation.
+      this.server
+        .to([`user_${user.id}`, `user_${recipientId}`])
+        .emit('inboxMessage', message);
+      return { status: 'sent', messageId: message.id, message };
     } catch (error) {
       this.logger.error('Error saving/broadcasting message', error);
-      return { status: 'error', message: 'Não foi possível enviar a mensagem.' };
+      return {
+        status: 'error',
+        message: 'Não foi possível enviar a mensagem.',
+      };
     }
   }
 

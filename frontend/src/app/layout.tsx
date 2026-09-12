@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ChatProvider } from "@/contexts/ChatContext";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { PushNotificationBanner } from "@/components/notifications/PushNotificationBanner";
@@ -44,18 +45,20 @@ export default function RootLayout({
         <MotionProvider>
           <QueryProvider>
             <AuthProvider>
-              <a href="#conteudo" className="skip-link">
-                Pular para o conteúdo
-              </a>
-              <Navbar />
-              <PushNotificationBanner />
-              <OfflineNotice />
-              <main id="conteudo" tabIndex={-1} className="site-main">
-                {children}
-              </main>
-              <PwaExperience />
-              <Footer />
-              <Toaster position="top-right" />
+              <ChatProvider>
+                <a href="#conteudo" className="skip-link">
+                  Pular para o conteúdo
+                </a>
+                <Navbar />
+                <PushNotificationBanner />
+                <OfflineNotice />
+                <main id="conteudo" tabIndex={-1} className="site-main">
+                  {children}
+                </main>
+                <PwaExperience />
+                <Footer />
+                <Toaster position="top-right" />
+              </ChatProvider>
             </AuthProvider>
           </QueryProvider>
         </MotionProvider>

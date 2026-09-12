@@ -61,6 +61,8 @@ export function resourcePolicy(endpoint: string, uid = "anonymous") {
 }
 
 export function mutationTargets(endpoint: string) {
+  // Chat owns its read receipts and unread refresh; do not reload the catalog/profile.
+  if (/^\/negotiations\/[^/]+\/messages\/read(?:\?|$)/.test(endpoint)) return [];
   const group = endpoint.split("?")[0].split("/").filter(Boolean)[0];
   if (group === "products" || group === "vehicles")
     return [queryKeys.products.all, queryKeys.vehicles.all, queryKeys.private];

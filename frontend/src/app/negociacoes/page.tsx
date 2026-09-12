@@ -1,8 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useChatInbox } from "@/contexts/ChatContext";
 import { useApiResource } from "@/hooks/useApiResource";
 import { LoginPanel } from "@/components/auth/LoginPanel";
 import {
@@ -20,6 +21,11 @@ import type { Negotiation } from "@/lib/chat";
 export default function MessagesPage() {
   const { user, loading: authLoading } = useAuth();
   const [tab, setTab] = useState("all");
+  const { unread } = useChatInbox();
+  const counts = useMemo(
+    () => new Map(unread.conversations.map((row) => [row.id, row.count])),
+    [unread.conversations],
+  );
   const { data, loading, error, reload } = useApiResource<Negotiation[]>(
     user ? `/negotiations${tab === "all" ? "" : "?role=" + tab}` : null,
   );
@@ -69,6 +75,7 @@ export default function MessagesPage() {
           {data.map((neg) => {
             const other = neg.buyerId === user.id ? neg.seller : neg.buyer;
             const last = neg.messages?.[0];
+            const unreadCount = counts.get(neg.id) || 0;
             return (
               <Link
                 key={neg.id}
@@ -83,7 +90,19 @@ export default function MessagesPage() {
                 </Avatar>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <h2 className="font-medium truncate">{other.name}</h2>
+                    <h2
+                      className={`truncate ${unreadCount ? "font-bold" : "font-medium"}`}
+                    >
+                      {other.name}
+                    </h2>
+                    {unreadCount > 0 && (
+                      <span
+                        className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-white"
+                        aria-label={`${unreadCount} mensagens não lidas`}
+                      >
+                        {unreadCount > 99 ? "99+" : unreadCount}
+                      </span>
+                    )}
                     <time dateTime={neg.updatedAt} className="caption shrink-0">
                       {relativeDate(neg.updatedAt)}
                     </time>

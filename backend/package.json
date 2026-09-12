@@ -23,7 +23,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
-    "prisma:seed": "tsx prisma/seed.ts"
+    "prisma:seed": "tsx prisma/seed.ts",
+    "env:check": "tsx scripts/check-env.ts",
+    "docker:local": "tsx scripts/docker-local.ts"
   },
   "engines": {
     "node": ">=22.22.3 <23"

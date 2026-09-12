@@ -69,3 +69,13 @@ describe('NegotiationsService.updateStatus', () => {
     expect(notifications.notifyStatusChange).not.toHaveBeenCalled();
   });
 });
+
+
+describe('Unread summary', () => {
+  it('counts only incoming unread messages in conversations belonging to the user', async () => {
+    const groupBy = vi.fn().mockResolvedValue([{ negotiationId: 'n1', _count: { _all: 2 } }, { negotiationId: 'n2', _count: { _all: 3 } }]);
+    const service = new NegotiationsService({ message: { groupBy } } as unknown as PrismaService, {} as NotificationsService);
+    expect(await service.getUnreadSummary('buyer')).toEqual({ total: 5, conversations: [{ id: 'n1', count: 2 }, { id: 'n2', count: 3 }] });
+    expect(groupBy).toHaveBeenCalledWith({ by: ['negotiationId'], where: { readAt: null, senderId: { not: 'buyer' }, negotiation: { OR: [{ buyerId: 'buyer' }, { sellerId: 'buyer' }] } }, _count: { _all: true } });
+  });
+});
