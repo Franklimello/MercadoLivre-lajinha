@@ -1,0 +1,183 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum ProductCondition {
+  NEW
+  LIKE_NEW
+  GOOD
+  FAIR
+}
+
+enum ProductType {
+  PRODUCT
+  VEHICLE
+}
+
+enum ProductStatus {
+  ACTIVE
+  PAUSED
+  SOLD
+}
+
+enum VehicleType {
+  CAR
+  MOTORCYCLE
+  TRUCK
+  UTILITY
+  AGRI_MACHINE
+  OTHER
+}
+
+enum NegotiationStatus {
+  OPEN
+  NEGOTIATING
+  AGREED
+  CANCELLED
+  COMPLETED
+}
+
+model User {
+  id                   String        @id @default(cuid())
+  firebaseUid          String        @unique
+  name                 String
+  email                String        @unique
+  avatarUrl            String?
+  whatsapp             String?
+  whatsappVerified     Boolean       @default(false)
+  notificationsEnabled Boolean       @default(false)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  products             Product[]
+  negotiationsAsBuyer  Negotiation[] @relation("BuyerNegotiations")
+  negotiationsAsSeller Negotiation[] @relation("SellerNegotiations")
+  messages             Message[]
+  fcmTokens            FcmToken[]
+
+  @@index([firebaseUid])
+  @@index([email])
+}
+
+model FcmToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  slug      String    @unique
+  icon      String?
+  products  Product[]
+  createdAt DateTime  @default(now())
+}
+
+model Product {
+  id           String           @id @default(cuid())
+  sellerId     String
+  seller       User             @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  title        String
+  description  String           @db.Text
+  price        Decimal          @db.Decimal(10, 2)
+  stock        Int              @default(1)
+  condition    ProductCondition
+  categoryId   String
+  category     Category         @relation(fields: [categoryId], references: [id])
+  type         ProductType      @default(PRODUCT)
+  status       ProductStatus    @default(ACTIVE)
+  city         String           @default("Lajinha")
+  state        String           @default("MG")
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  images       ProductImage[]
+  vehicle      Vehicle?
+  negotiations Negotiation[]
+
+  @@index([sellerId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([type])
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  fileId    String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+}
+
+model Vehicle {
+  id           String      @id @default(cuid())
+  productId    String      @unique
+  product      Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  vehicleType  VehicleType
+  brand        String
+  model        String
+  year         Int
+  mileage      Int
+  color        String
+  fuel         String
+  transmission String
+  engine       String
+  bodyType     String?
+  plateEnd     String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([vehicleType])
+  @@index([brand])
+  @@index([year])
+}
+
+model Negotiation {
+  id        String            @id @default(cuid())
+  productId String
+  product   Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  buyerId   String
+  buyer     User              @relation("BuyerNegotiations", fields: [buyerId], references: [id], onDelete: Cascade)
+  sellerId  String
+  seller    User              @relation("SellerNegotiations", fields: [sellerId], references: [id], onDelete: Cascade)
+  status    NegotiationStatus @default(OPEN)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  messages  Message[]
+
+  @@unique([productId, buyerId])
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([productId])
+}
+
+model Message {
+  id            String      @id @default(cuid())
+  negotiationId String
+  negotiation   Negotiation @relation(fields: [negotiationId], references: [id], onDelete: Cascade)
+  senderId      String
+  sender        User        @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  content       String      @db.Text
+  readAt        DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@index([negotiationId])
+  @@index([senderId])
+}

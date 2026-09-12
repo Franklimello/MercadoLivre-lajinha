@@ -8,6 +8,9 @@
     "build:frontend": "npm run build --prefix frontend",
     "build:backend": "npm run build --prefix backend",
     "lint:frontend": "npm run lint --prefix frontend",
-    "lint:backend": "npm run lint --prefix backend"
+    "lint:backend": "npm run lint --prefix backend",
+    "prisma:generate": "npm run prisma:generate --prefix backend",
+    "prisma:migrate": "npm run prisma:migrate --prefix backend",
+    "prisma:seed": "npm run prisma:seed --prefix backend"
   }
 }
