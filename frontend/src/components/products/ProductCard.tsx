@@ -35,42 +35,50 @@ export function ProductCard({ product }: { product: ProductSummary }) {
   });
 
   return (
-    <Link href={`/produtos/${product.id}`} className="group block">
-      <Card className="overflow-hidden border-border/80 transition-all duration-200 hover:shadow-md hover:border-primary/40 rounded-xl">
-        <div className="relative aspect-4/3 w-full overflow-hidden bg-muted">
+    <Link href={`/produtos/${product.id}`} className="group block h-full">
+      <Card className="h-full flex flex-col overflow-hidden border-border/50 bg-card transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:border-primary/30 rounded-2xl">
+        <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted/30">
           {coverImage ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={coverImage}
               alt={product.title}
-              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
             />
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-              <ImageIcon className="h-10 w-10 opacity-30" />
+            <div className="flex h-full w-full items-center justify-center text-muted-foreground/40">
+              <ImageIcon className="h-12 w-12" />
             </div>
           )}
-          <Badge
-            variant={conditionInfo.variant}
-            className="absolute top-2.5 left-2.5 text-[11px] font-semibold backdrop-blur-xs shadow-xs"
-          >
-            {conditionInfo.label}
-          </Badge>
+          {/* Badge de Condição */}
+          <div className="absolute top-3 left-3">
+            <Badge
+              variant={conditionInfo.variant}
+              className="px-2 py-0.5 text-[10px] uppercase tracking-wider font-bold backdrop-blur-md bg-background/80 text-foreground border-none shadow-sm"
+            >
+              {conditionInfo.label}
+            </Badge>
+          </div>
         </div>
 
-        <CardContent className="p-3.5 space-y-1.5">
-          <p className="text-xs text-muted-foreground truncate">
-            {product.category?.name || 'Geral'}
-          </p>
-          <h3 className="font-semibold text-sm line-clamp-2 text-foreground group-hover:text-primary transition-colors leading-snug">
-            {product.title}
-          </h3>
-          <p className="text-lg font-bold text-primary tracking-tight">
-            {formattedPrice}
-          </p>
-          <div className="flex items-center gap-1 text-[11px] text-muted-foreground pt-1">
-            <MapPin className="h-3 w-3 shrink-0 text-muted-foreground/70" />
-            <span className="truncate">{product.city} - {product.state}</span>
+        <CardContent className="flex flex-col flex-1 p-4 space-y-2.5">
+          <div className="space-y-1 flex-1">
+            <p className="text-[11px] font-medium text-primary/80 uppercase tracking-wider">
+              {product.category?.name || 'Geral'}
+            </p>
+            <h3 className="font-semibold text-sm md:text-base line-clamp-2 text-foreground/90 group-hover:text-primary transition-colors leading-tight">
+              {product.title}
+            </h3>
+          </div>
+          
+          <div className="pt-2">
+            <p className="text-xl md:text-2xl font-black text-primary tracking-tight">
+              {formattedPrice}
+            </p>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1.5">
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+              <span className="truncate font-medium">{product.city} - {product.state}</span>
+            </div>
           </div>
         </CardContent>
       </Card>
