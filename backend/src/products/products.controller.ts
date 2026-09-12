@@ -51,6 +51,12 @@ export class ProductsController {
     });
   }
 
+  @Get('my/all')
+  @UseGuards(FirebaseAuthGuard)
+  findMyProducts(@CurrentUser() user: User) {
+    return this.productsService.findMyProducts(user.id);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.productsService.findOne(id);

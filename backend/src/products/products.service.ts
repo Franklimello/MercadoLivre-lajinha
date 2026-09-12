@@ -23,6 +23,21 @@ export class ProductsService {
     });
   }
 
+  async findMyProducts(userId: string) {
+    return this.prisma.product.findMany({
+      where: { sellerId: userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        images: { orderBy: { position: 'asc' } },
+        category: true,
+        vehicle: true,
+        _count: {
+          select: { negotiations: true },
+        },
+      },
+    });
+  }
+
   async create(userId: string, dto: CreateProductDto) {
     // 1. Validar requisitos do vendedor (WhatsApp cadastrado e notificações habilitadas)
     const user = await this.prisma.user.findUniqueOrThrow({
