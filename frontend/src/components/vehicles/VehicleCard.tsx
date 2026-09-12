@@ -29,6 +29,8 @@ export function VehicleCard({
     <motion.article
       ref={ref}
       variants={cardReveal}
+      initial={false}
+      animate="visible"
       exit={{ opacity: 0, scale: 0.97 }}
       layout="position"
       whileHover={{ y: -3 }}
