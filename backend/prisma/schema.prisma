@@ -24,6 +24,7 @@ enum ProductStatus {
   ACTIVE
   PAUSED
   SOLD
+  ARCHIVED
 }
 
 enum VehicleType {

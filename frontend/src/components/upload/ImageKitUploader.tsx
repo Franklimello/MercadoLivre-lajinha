@@ -1,173 +1,219 @@
-'use client';
-
-import React, { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { UploadCloud, X, Image as ImageIcon, Loader2 } from 'lucide-react';
-import { apiFetch } from '@/lib/api';
-import { toast } from 'sonner';
-
+"use client";
+import { useId, useState } from "react";
+import { Camera, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
+import { ListingImage } from "@/components/marketplace/ListingImage";
+import { apiFetch } from "@/lib/api";
+import { AnimatePresence, motion } from "motion/react";
+import { motionTokens } from "@/lib/motion";
+import { preparePhoto } from "@/lib/prepare-photo";
+import { useOnline } from "@/hooks/useOnline";
 export interface UploadedImage {
   url: string;
   fileId: string;
 }
-
-interface ImageKitUploaderProps {
-  images: UploadedImage[];
-  onChange: (images: UploadedImage[]) => void;
-  maxImages?: number;
-}
-
 export function ImageKitUploader({
   images,
   onChange,
   maxImages = 5,
-}: ImageKitUploaderProps) {
+  onUploadingChange,
+}: {
+  images: UploadedImage[];
+  onChange: (images: UploadedImage[]) => void;
+  maxImages?: number;
+  onUploadingChange?: (value: boolean) => void;
+}) {
+  const inputId = useId();
+  const online = useOnline();
   const [uploading, setUploading] = useState(false);
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const remainingSlots = maxImages - images.length;
-    if (files.length > remainingSlots) {
-      toast.error(`Você só pode adicionar mais ${remainingSlots} imagem(ns). Limite: 5 fotos.`);
+  const [error, setError] = useState("");
+  const [progress, setProgress] = useState("");
+  async function selectFiles(event: React.ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const files = Array.from(input.files || []);
+    input.value = "";
+    if (!files.length) return;
+    if (!online) { setError("Conecte-se para enviar as fotos. Os demais campos do rascunho continuam salvos neste dispositivo."); return; }
+    if (files.length > maxImages - images.length) {
+      setError(
+        `Você pode adicionar mais ${maxImages - images.length} foto(s).`,
+      );
       return;
     }
-
-    setUploading(true);
-    const newUploaded: UploadedImage[] = [];
-
-    try {
-      // 1. Obter parâmetros de assinatura do backend
-      let authParams: { token: string; expire: number; signature: string };
-      try {
-        authParams = await apiFetch('/upload/auth');
-      } catch {
-        authParams = {
-          token: 'mock-token-' + Date.now(),
-          expire: Math.floor(Date.now() / 1000) + 1800,
-          signature: 'mock-sig',
-        };
-      }
-
-      const publicKey = process.env.NEXT_PUBLIC_IMAGEKIT_PUBLIC_KEY;
-
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-
-        if (file.size > 5 * 1024 * 1024) {
-          toast.error(`A imagem "${file.name}" excede o tamanho máximo de 5MB.`);
-          continue;
-        }
-
-        if (publicKey && publicKey !== 'your_imagekit_public_key') {
-          // Upload real para o ImageKit
-          const formData = new FormData();
-          formData.append('file', file);
-          formData.append('fileName', file.name);
-          formData.append('publicKey', publicKey);
-          formData.append('signature', authParams.signature);
-          formData.append('expire', String(authParams.expire));
-          formData.append('token', authParams.token);
-
-          const res = await fetch('https://upload.imagekit.io/api/v1/files/upload', {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (!res.ok) throw new Error('Falha no upload para o ImageKit');
-          const data = await res.json();
-          newUploaded.push({ url: data.url, fileId: data.fileId });
-        } else {
-          // Modo desenvolvimento: gera preview data URL
-          const previewUrl = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (event) => resolve(event.target?.result as string);
-            reader.readAsDataURL(file);
-          });
-          newUploaded.push({
-            url: previewUrl,
-            fileId: `mock-file-${Date.now()}-${i}`,
-          });
-        }
-      }
-
-      onChange([...images, ...newUploaded]);
-      toast.success(`${newUploaded.length} imagem(ns) adicionada(s)!`);
-    } catch (error: any) {
-      console.error(error);
-      toast.error('Erro ao enviar imagem. Verifique sua conexão.');
-    } finally {
-      setUploading(false);
-      e.target.value = '';
+    const publicKey = process.env.NEXT_PUBLIC_IMAGEKIT_PUBLIC_KEY;
+    if (!publicKey || publicKey.includes("your_")) {
+      setError(
+        "O envio de fotos está indisponível no momento. Tente novamente mais tarde.",
+      );
+      return;
     }
-  };
-
-  const handleRemove = (index: number) => {
-    const updated = images.filter((_, idx) => idx !== index);
-    onChange(updated);
-  };
-
+    setError("");
+    setUploading(true);
+    onUploadingChange?.(true);
+    const uploaded: UploadedImage[] = [];
+    const failures: string[] = [];
+    for (const [i, file] of files.entries()) {
+      if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+        failures.push(`${file.name}: use JPG, PNG ou WebP.`);
+        continue;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        failures.push(`${file.name}: o limite é 5 MB.`);
+        continue;
+      }
+      setProgress(`Enviando foto ${i + 1} de ${files.length}…`);
+      try {
+        const auth = await apiFetch<{
+          token: string;
+          expire: number;
+          signature: string;
+        }>("/upload/auth");
+        const form = new FormData();
+        const photo = await preparePhoto(file).catch(() => file);
+        form.append("file", photo);
+        form.append("fileName", `${crypto.randomUUID()}.${photo.type === "image/webp" ? "webp" : photo.type === "image/png" ? "png" : "jpg"}`);
+        form.append("useUniqueFileName", "true");
+        form.append("overwriteFile", "false");
+        form.append("publicKey", publicKey);
+        form.append("signature", auth.signature);
+        form.append("expire", String(auth.expire));
+        form.append("token", auth.token);
+        const response = await fetch(
+          "https://upload.imagekit.io/api/v1/files/upload",
+          { method: "POST", body: form },
+        );
+        if (!response.ok) throw new Error("Upload failed");
+        const data: UploadedImage = await response.json();
+        if (!data.url || !data.fileId) throw new Error("Invalid response");
+        uploaded.push({ url: data.url, fileId: data.fileId });
+      } catch {
+        failures.push(`Não foi possível enviar ${file.name}. Tente novamente.`);
+      }
+    }
+    onChange([...images, ...uploaded]);
+    setError(failures.join(" "));
+    setProgress(
+      uploaded.length ? `${uploaded.length} foto(s) adicionada(s).` : "",
+    );
+    setUploading(false);
+    onUploadingChange?.(false);
+  }
+  function move(index: number, direction: number) {
+    const next = [...images];
+    [next[index], next[index + direction]] = [
+      next[index + direction],
+      next[index],
+    ];
+    onChange(next);
+  }
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <label className="text-sm font-semibold text-foreground">
-          Fotos do Anúncio ({images.length}/{maxImages})
-        </label>
-        <span className="text-xs text-muted-foreground">Máximo de 5 fotos</span>
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 className="section-title">Fotos do anúncio</h2>
+        <span className="caption">
+          {images.length} de {maxImages}
+        </span>
       </div>
-
-      {/* Grid de Imagens */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-        {images.map((img, idx) => (
-          <div
-            key={img.fileId || idx}
-            className="relative group aspect-square rounded-xl overflow-hidden border border-border bg-muted/40 shadow-xs"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={img.url}
-              alt={`Foto ${idx + 1}`}
-              className="w-full h-full object-cover transition-transform group-hover:scale-105"
-            />
-            {idx === 0 && (
-              <span className="absolute bottom-1.5 left-1.5 bg-primary/90 text-primary-foreground text-[10px] font-bold px-1.5 py-0.5 rounded">
-                Principal
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => handleRemove(idx)}
-              className="absolute top-1.5 right-1.5 bg-black/70 hover:bg-destructive text-white p-1 rounded-full transition-colors opacity-90 group-hover:opacity-100"
+      <p className="caption">
+        A primeira foto será a capa. Mostre o produto por inteiro e os detalhes
+        de uso.
+      </p>
+      <div className="upload-grid">
+        <AnimatePresence initial={false}>
+          {images.map((photo, i) => (
+            <motion.div
+              key={photo.fileId}
+              layout
+              initial={{ opacity: 0, scale: 0.94 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.92 }}
+              transition={motionTokens.spring.smooth}
             >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ))}
-
-        {/* Botão de Upload */}
+              <div className="upload-tile">
+                <ListingImage
+                  src={photo.url}
+                  alt={`Foto ${i + 1} do anúncio`}
+                  sizes="(max-width: 639px) calc((100vw - 48px) / 2), 180px"
+                />
+                <motion.button
+                  type="button"
+                  disabled={uploading}
+                  onClick={() => onChange(images.filter((_, idx) => idx !== i))}
+                  className="icon-button absolute right-1 top-1 bg-white"
+                  aria-label={`Remover foto ${i + 1}`}
+                  whileTap={{ scale: 0.88 }}
+                >
+                  <X size={18} />
+                </motion.button>
+                <span className="absolute bottom-2 left-2 rounded bg-white px-2 py-1 text-xs font-medium">
+                  {i === 0 ? "Foto principal" : `Foto ${i + 1}`}
+                </span>
+              </div>
+              <div className="mt-1 flex justify-between">
+                <motion.button
+                  type="button"
+                  className="icon-button disabled:opacity-25"
+                  disabled={uploading || i === 0}
+                  onClick={() => move(i, -1)}
+                  aria-label={`Mover foto ${i + 1} para antes`}
+                  whileTap={{ scale: 0.88 }}
+                >
+                  <ChevronLeft size={18} />
+                </motion.button>
+                <motion.button
+                  type="button"
+                  className="icon-button disabled:opacity-25"
+                  disabled={uploading || i === images.length - 1}
+                  onClick={() => move(i, 1)}
+                  aria-label={`Mover foto ${i + 1} para depois`}
+                  whileTap={{ scale: 0.88 }}
+                >
+                  <ChevronRight size={18} />
+                </motion.button>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
         {images.length < maxImages && (
-          <label className="aspect-square flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border hover:border-primary/60 bg-muted/20 hover:bg-primary/5 cursor-pointer transition-colors p-3 text-center">
+          <motion.label
+            htmlFor={inputId}
+            className="upload-tile upload-add cursor-pointer hover:bg-accent"
+            layout
+            whileTap={{ scale: 0.98 }}
+            transition={motionTokens.spring.snappy}
+          >
             {uploading ? (
-              <Loader2 className="h-6 w-6 text-primary animate-spin mb-1.5" />
+              <Loader2 className="animate-spin" size={24} />
             ) : (
-              <UploadCloud className="h-6 w-6 text-muted-foreground group-hover:text-primary mb-1.5" />
+              <Camera size={24} strokeWidth={1.6} />
             )}
-            <span className="text-xs font-semibold text-foreground">
-              {uploading ? 'Enviando...' : 'Adicionar Foto'}
+            <span className="text-sm font-medium">
+              {uploading ? "Enviando…" : "Adicionar fotos"}
             </span>
-            <span className="text-[10px] text-muted-foreground mt-0.5">JPG, PNG até 5MB</span>
+            <span className="text-xs text-muted-foreground">
+              JPG, PNG ou WebP
+              <br />
+              Até 5 MB por foto
+            </span>
             <input
+              id={inputId}
               type="file"
-              accept="image/*"
+              accept="image/jpeg,image/png,image/webp"
               multiple
               disabled={uploading}
-              onChange={handleFileSelect}
-              className="hidden"
+              onChange={selectFiles}
+              className="sr-only"
             />
-          </label>
+          </motion.label>
         )}
       </div>
+      <p className="caption" role="status">
+        {progress}
+      </p>
+      {error && (
+        <p className="inline-error" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

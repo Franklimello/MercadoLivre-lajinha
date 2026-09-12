@@ -1,135 +1,361 @@
-'use client';
-
-import React from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
-import { Button, buttonVariants } from '@/components/ui/button';
+"use client";
+import { Suspense, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import Image from "next/image";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  MapPin,
+  MessageSquare,
+  Plus,
+  Search,
+  Car,
+  Home,
+  UserRound,
+  LogOut,
+} from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { buttonVariants } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { ShoppingBag, Car, PlusCircle, MessageSquare, User, LogOut, LogIn } from 'lucide-react';
+} from "@/components/ui/dropdown-menu";
+import { toast } from "sonner";
+import {
+  motion,
+  useReducedMotion,
+  useScroll,
+  useTransform,
+} from "motion/react";
+import { motionTokens } from "@/lib/motion";
+
+function HeaderSearch() {
+  const params = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  const vehicles = pathname.startsWith("/veiculos");
+  const catalog = pathname === "/" || pathname === "/veiculos";
+  const [focused, setFocused] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const urlTerm = catalog ? params.get("q") || "" : "";
+  useEffect(() => {
+    if (searchInput.current && !searchTimer.current)
+      searchInput.current.value = urlTerm;
+  }, [urlTerm, pathname]);
+  useEffect(
+    () => () => {
+      clearTimeout(searchTimer.current);
+      searchTimer.current = undefined;
+    },
+    [pathname],
+  );
+  function search(term: string, replace = false) {
+    const query = catalog
+      ? new URLSearchParams(params.toString())
+      : new URLSearchParams();
+    if (term) query.set("q", term);
+    else query.delete("q");
+    query.delete("page");
+    const href = `${vehicles ? "/veiculos" : "/"}?${query}`;
+    if (replace) router.replace(href, { scroll: false });
+    else router.push(href);
+  }
+  function scheduleVehicleSearch(value: string) {
+    clearTimeout(searchTimer.current);
+    if (!vehicles || !catalog) return;
+    searchTimer.current = setTimeout(() => {
+      searchTimer.current = undefined;
+      const term = value.trim();
+      if (term !== urlTerm) search(term, true);
+    }, 400);
+  }
+  return (
+    <motion.form
+      role="search"
+      className="search-bar header-search"
+      initial={false}
+      animate={
+        focused
+          ? { boxShadow: "0 0 0 3px rgba(36, 96, 68, 0.12)" }
+          : { boxShadow: "0 0 0 0 rgba(36, 96, 68, 0)" }
+      }
+      transition={{ duration: motionTokens.duration.quick }}
+      onFocusCapture={() => setFocused(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget))
+          setFocused(false);
+      }}
+      onSubmit={(event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const term = String(data.get("q") || "").trim();
+        clearTimeout(searchTimer.current);
+        searchTimer.current = undefined;
+        search(term);
+      }}
+    >
+      <motion.span
+        aria-hidden="true"
+        animate={
+          focused ? { scale: 1.08, rotate: -7 } : { scale: 1, rotate: 0 }
+        }
+        transition={motionTokens.spring.snappy}
+        className="shrink-0 text-muted-foreground"
+      >
+        <Search size={19} />
+      </motion.span>
+      <label htmlFor="site-search" className="sr-only">
+        Buscar {vehicles ? "veículos" : "produtos"}
+      </label>
+      <input
+        key={pathname}
+        ref={searchInput}
+        id="site-search"
+        name="q"
+        type="search"
+        maxLength={120}
+        defaultValue={catalog ? params.get("q") || "" : ""}
+        onChange={(event) => {
+          if (!(event.nativeEvent as InputEvent).isComposing)
+            scheduleVehicleSearch(event.currentTarget.value);
+        }}
+        onCompositionStart={() => clearTimeout(searchTimer.current)}
+        onCompositionEnd={(event) =>
+          scheduleVehicleSearch(event.currentTarget.value)
+        }
+        placeholder={
+          vehicles ? "Busque marca ou modelo" : "O que você está procurando?"
+        }
+      />
+      <motion.button
+        type="submit"
+        className="icon-button bg-primary text-white hover:bg-[#194d34]"
+        aria-label="Buscar"
+        whileTap={{ scale: 0.9 }}
+        transition={motionTokens.spring.snappy}
+      >
+        <Search size={19} />
+      </motion.button>
+    </motion.form>
+  );
+}
 
 export function Navbar() {
-  const { user, loading, signInWithGoogle, signOut } = useAuth();
+  const { user, loading, signOut } = useAuth();
+  const pathname = usePathname();
   const router = useRouter();
-
+  const chat = /^\/negociacoes\/.+/.test(pathname);
+  const reducedMotion = useReducedMotion();
+  const { scrollY } = useScroll();
+  const secondaryOpacity = useTransform(scrollY, [24, 120], [1, 0]);
+  const secondaryY = useTransform(scrollY, [24, 120], [0, -4]);
+  const headerShadow = useTransform(
+    scrollY,
+    [0, 100],
+    ["0 4px 16px rgba(38, 53, 45, 0)", "0 4px 16px rgba(38, 53, 45, 0.07)"],
+  );
+  const isActive = (href: string) =>
+    href === "/"
+      ? pathname === "/" || pathname.startsWith("/produtos")
+      : href === "/anunciar"
+        ? pathname === "/anunciar" || pathname === "/veiculos/novo"
+        : pathname.startsWith(href) && pathname !== "/veiculos/novo";
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-md shadow-xs transition-all">
-      <div className="container mx-auto flex h-16 md:h-20 items-center justify-between px-4 lg:px-8">
-        {/* Brand */}
-        <Link href="/" className="flex items-center gap-2.5 font-black text-2xl text-primary tracking-tight transition-transform hover:scale-105">
-          <div className="bg-primary text-primary-foreground p-2 rounded-xl shadow-sm">
-            <ShoppingBag className="h-5 w-5 md:h-6 md:w-6" />
+    <>
+      <motion.header
+        className="site-header"
+        style={{ boxShadow: chat ? "none" : headerShadow }}
+      >
+        <div className="shell header-main">
+          <Link
+            href="/"
+            className="wordmark"
+            aria-label="Mercado Livre Lajinha — início"
+          >
+            <Image
+              src="/brand/icon.svg"
+              width={40}
+              height={40}
+              alt=""
+              className="brand-icon"
+              priority
+            />
+            <Image
+              src="/brand/logo.svg"
+              width={229}
+              height={40}
+              alt=""
+              className="brand-logo"
+              priority
+            />
+          </Link>
+          <Suspense
+            fallback={<div className="header-search skeleton h-12 flex-1" />}
+          >
+            <HeaderSearch />
+          </Suspense>
+          <div className="header-actions">
+            <Link
+              href="/negociacoes"
+              className="hidden lg:inline-flex icon-button"
+              aria-label="Mensagens"
+            >
+              <MessageSquare size={21} />
+            </Link>
+            {loading ? (
+              <div
+                className="skeleton size-11 rounded-full"
+                aria-label="Carregando conta"
+              />
+            ) : user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  aria-label="Abrir menu da conta"
+                  className="icon-button"
+                >
+                  <Avatar className="size-9">
+                    <AvatarImage src={user.avatarUrl || ""} alt="" />
+                    <AvatarFallback>
+                      {user.name.slice(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <p className="px-3 py-2 text-sm font-medium truncate">
+                    {user.name}
+                  </p>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => router.push("/conta")}>
+                    <UserRound />
+                    Minha conta e anúncios
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => router.push("/negociacoes")}>
+                    <MessageSquare />
+                    Mensagens
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={async () => {
+                      try {
+                        await signOut();
+                      } catch {
+                        toast.error("Não foi possível sair. Tente novamente.");
+                      }
+                    }}
+                  >
+                    <LogOut />
+                    Sair da conta
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Link
+                href="/login"
+                className="inline-flex min-h-11 items-center gap-2 text-sm font-medium"
+              >
+                <UserRound size={19} />
+                Entrar
+              </Link>
+            )}
+            <motion.div
+              className="hidden md:block"
+              variants={{ rest: { y: 0 }, hover: { y: -1 } }}
+              whileTap={{ scale: 0.97 }}
+              initial="rest"
+              whileHover="hover"
+              transition={motionTokens.spring.snappy}
+            >
+              <Link href="/anunciar" className={`${buttonVariants()} group`}>
+                <motion.span
+                  aria-hidden="true"
+                  className="inline-flex"
+                  variants={{ rest: { rotate: 0 }, hover: { rotate: 90 } }}
+                  transition={motionTokens.spring.snappy}
+                >
+                  <Plus />
+                </motion.span>
+                Anunciar
+              </Link>
+            </motion.div>
           </div>
-          <span className="hidden sm:inline-block text-foreground">
-            Mercado <span className="text-amber-500">Lajinha</span>
-          </span>
-          <span className="sm:hidden text-foreground">
-            M<span className="text-amber-500">L</span>
-          </span>
-        </Link>
-
-        {/* Desktop Links */}
-        <nav className="hidden md:flex items-center gap-8 text-sm font-semibold">
-          <Link href="/" className="text-foreground/70 hover:text-primary transition-colors flex items-center gap-2">
-            <ShoppingBag className="h-4 w-4" />
-            Produtos
-          </Link>
-          <Link
-            href="/veiculos"
-            className="flex items-center gap-2 text-foreground/70 hover:text-primary transition-colors"
-          >
-            <Car className="h-4 w-4" />
-            Veículos
-          </Link>
-        </nav>
-
-        {/* Right Actions */}
-        <div className="flex items-center gap-4">
-          <Link
-            href="/anunciar"
-            className={buttonVariants({
-              size: 'default',
-              className: 'hidden md:inline-flex bg-primary hover:bg-primary/90 text-primary-foreground font-bold shadow-md hover:shadow-lg transition-all rounded-full px-6',
-            })}
-          >
-            <PlusCircle className="mr-2 h-5 w-5" />
-            Anunciar Grátis
-          </Link>
-
-          {loading ? (
-            <div className="h-10 w-10 rounded-full bg-muted animate-pulse" />
-          ) : user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger className="relative h-10 w-10 rounded-full p-0 outline-none flex items-center justify-center cursor-pointer ring-2 ring-transparent hover:ring-primary/20 transition-all">
-                <Avatar className="h-10 w-10 border-2 border-background shadow-sm">
-                  <AvatarImage src={user.avatarUrl || ''} alt={user.name} />
-                  <AvatarFallback className="bg-primary/10 font-bold text-primary">
-                    {user.name.slice(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64 p-2 rounded-xl shadow-xl">
-                <div className="p-3 text-sm font-medium bg-muted/30 rounded-lg mb-2">
-                  <p className="font-bold text-base text-foreground">{user.name}</p>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">{user.email}</p>
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => router.push('/conta')} className="flex items-center cursor-pointer p-2.5 rounded-md hover:bg-primary/5">
-                  <User className="mr-3 h-4 w-4 text-primary" />
-                  <span className="font-medium">Minha Conta</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => router.push('/negociacoes')} className="flex items-center cursor-pointer p-2.5 rounded-md hover:bg-primary/5">
-                  <MessageSquare className="mr-3 h-4 w-4 text-primary" />
-                  <span className="font-medium">Mensagens</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => signOut()} className="text-destructive cursor-pointer p-2.5 rounded-md hover:bg-destructive/5 mt-1">
-                  <LogOut className="mr-3 h-4 w-4" />
-                  <span className="font-medium">Sair</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <Button size="default" onClick={() => signInWithGoogle()} className="font-bold gap-2 rounded-full px-6 shadow-md hover:shadow-lg transition-all">
-              <LogIn className="h-4 w-4" />
-              Entrar
-            </Button>
-          )}
         </div>
-      </div>
-
-      {/* Mobile Bottom Navigation Bar */}
-      <div className="md:hidden fixed bottom-0 left-0 z-50 w-full h-16 bg-background/90 backdrop-blur-xl border-t flex items-center justify-around px-2 shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] pb-safe">
-        <Link href="/" className="flex flex-col items-center justify-center w-16 text-[10px] font-bold text-muted-foreground hover:text-primary transition-colors">
-          <ShoppingBag className="h-5 w-5 mb-1" />
-          Produtos
-        </Link>
-        <Link href="/veiculos" className="flex flex-col items-center justify-center w-16 text-[10px] font-bold text-muted-foreground hover:text-primary transition-colors">
-          <Car className="h-5 w-5 mb-1" />
-          Veículos
-        </Link>
-        <Link href="/anunciar" className="flex flex-col items-center justify-center w-16 text-[10px] font-bold text-primary transition-transform hover:scale-105 group">
-          <div className="bg-primary text-primary-foreground p-3 rounded-full -mt-6 shadow-lg shadow-primary/30 group-hover:shadow-primary/50 transition-all border-4 border-background">
-            <PlusCircle className="h-6 w-6" />
-          </div>
-          <span className="mt-1">Anunciar</span>
-        </Link>
-        <Link href="/negociacoes" className="flex flex-col items-center justify-center w-16 text-[10px] font-bold text-muted-foreground hover:text-primary transition-colors">
-          <MessageSquare className="h-5 w-5 mb-1" />
-          Chat
-        </Link>
-        <Link href="/conta" className="flex flex-col items-center justify-center w-16 text-[10px] font-bold text-muted-foreground hover:text-primary transition-colors">
-          <User className="h-5 w-5 mb-1" />
-          Conta
-        </Link>
-      </div>
-    </header>
+        <div className="shell header-sub">
+          <nav aria-label="Navegação principal" className="desktop-nav">
+            <Link href="/" aria-current={isActive("/") ? "page" : undefined}>
+              Produtos
+            </Link>
+            <Link
+              href="/veiculos"
+              aria-current={isActive("/veiculos") ? "page" : undefined}
+            >
+              Veículos
+            </Link>
+          </nav>
+          <motion.p
+            className="region-label"
+            style={{
+              opacity: secondaryOpacity,
+              y: reducedMotion ? 0 : secondaryY,
+            }}
+          >
+            <MapPin size={14} aria-hidden="true" />
+            Lajinha e região · MG
+          </motion.p>
+          <motion.span
+            className="caption hidden sm:block md:hidden"
+            style={{ opacity: secondaryOpacity }}
+          >
+            Compre e venda por aqui.
+          </motion.span>
+        </div>
+      </motion.header>
+      {!chat && (
+        <nav className="bottom-nav" aria-label="Navegação do celular">
+          {[
+            { href: "/", label: "Início", icon: Home },
+            { href: "/veiculos", label: "Veículos", icon: Car },
+            { href: "/anunciar", label: "Anunciar", icon: Plus },
+            { href: "/negociacoes", label: "Mensagens", icon: MessageSquare },
+            { href: "/conta", label: "Conta", icon: UserRound },
+          ].map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              aria-current={isActive(href) ? "page" : undefined}
+              className={href === "/anunciar" ? "nav-publish" : ""}
+            >
+              {isActive(href) && (
+                <motion.span
+                  layoutId="mobile-nav-active"
+                  className="bottom-nav-indicator"
+                  transition={motionTokens.spring.snappy}
+                />
+              )}
+              <motion.span
+                className="bottom-nav-content"
+                whileTap={
+                  href === "/anunciar"
+                    ? { scale: 0.9, rotate: -3 }
+                    : { scale: 0.9 }
+                }
+                animate={
+                  isActive(href) ? { y: -1, scale: 1.04 } : { y: 0, scale: 1 }
+                }
+                transition={motionTokens.spring.snappy}
+              >
+                <Icon size={21} strokeWidth={1.7} aria-hidden="true" />
+                <span>{label}</span>
+              </motion.span>
+            </Link>
+          ))}
+        </nav>
+      )}
+    </>
   );
 }

@@ -11,10 +11,17 @@ import { VehiclesModule } from './vehicles/vehicles.module.js';
 import { NegotiationsModule } from './negotiations/negotiations.module.js';
 import { ChatModule } from './chat/chat.module.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
+import { HealthModule } from './health/health.module.js';
+import { validateEnvironment } from './config/environment.js';
+import { APP_GUARD } from '@nestjs/core';
+import { RateLimitGuard } from './common/rate-limit.guard.js';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validate: validateEnvironment,
+    }),
     PrismaModule,
     FirebaseAdminModule,
     NotificationsModule,
@@ -24,8 +31,12 @@ import { NotificationsModule } from './notifications/notifications.module.js';
     VehiclesModule,
     NegotiationsModule,
     ChatModule,
+    HealthModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    { provide: APP_GUARD, useClass: RateLimitGuard },
+  ],
 })
 export class AppModule {}

@@ -29,7 +29,24 @@ export class NotificationsService {
       }
 
       const tokenList = tokens.map((t) => t.token);
-      await this.firebaseAdmin.sendPushNotification(tokenList, title, body, data);
+      const invalidTokens = await this.firebaseAdmin.sendPushNotification(
+        tokenList,
+        title,
+        body,
+        data,
+      );
+      if (invalidTokens.length > 0) {
+        await this.prisma.fcmToken.deleteMany({
+          where: { token: { in: invalidTokens } },
+        });
+        const remaining = await this.prisma.fcmToken.count({ where: { userId } });
+        if (remaining === 0) {
+          await this.prisma.user.update({
+            where: { id: userId },
+            data: { notificationsEnabled: false },
+          });
+        }
+      }
       this.logger.log(`Push sent to user ${userId} (${tokenList.length} devices)`);
     } catch (error) {
       this.logger.error(`Error notifying user ${userId}`, error);

@@ -6,11 +6,15 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateProductDto, UpdateProductDto } from './dto/product.dto.js';
-import { ProductStatus, ProductType, Prisma } from '@prisma/client';
+import { ProductCondition, ProductStatus, ProductType, Prisma } from '@prisma/client';
+import { UploadService } from '../upload/upload.service.js';
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly upload: UploadService,
+  ) {}
 
   async getCategories() {
     return this.prisma.category.findMany({
@@ -25,7 +29,7 @@ export class ProductsService {
 
   async findMyProducts(userId: string) {
     return this.prisma.product.findMany({
-      where: { sellerId: userId },
+      where: { sellerId: userId, status: { not: ProductStatus.ARCHIVED } },
       orderBy: { createdAt: 'desc' },
       include: {
         images: { orderBy: { position: 'asc' } },
@@ -42,6 +46,7 @@ export class ProductsService {
     // 1. Validar requisitos do vendedor (WhatsApp cadastrado e notificações habilitadas)
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
+      include: { _count: { select: { fcmTokens: true } } },
     });
 
     if (!user.whatsapp) {
@@ -50,7 +55,7 @@ export class ProductsService {
       );
     }
 
-    if (!user.notificationsEnabled) {
+    if (!user.notificationsEnabled || user._count.fcmTokens === 0) {
       throw new BadRequestException(
         'É obrigatório ativar as notificações push antes de publicar anúncios.',
       );
@@ -64,6 +69,7 @@ export class ProductsService {
     if (dto.images.length > 5) {
       throw new BadRequestException('Cada anúncio pode ter no máximo 5 imagens.');
     }
+    this.upload.assertManagedImages(dto.images);
 
     // 3. Criar produto e associar imagens
     return this.prisma.product.create({
@@ -97,7 +103,7 @@ export class ProductsService {
   async findAll(params: {
     q?: string;
     categorySlug?: string;
-    condition?: string;
+    condition?: ProductCondition;
     minPrice?: number;
     maxPrice?: number;
     sort?: 'newest' | 'price_asc' | 'price_desc';
@@ -108,6 +114,13 @@ export class ProductsService {
     const limit = Math.min(50, Math.max(1, Number(params.limit) || 12));
     const skip = (page - 1) * limit;
 
+    if (
+      params.minPrice !== undefined &&
+      params.maxPrice !== undefined &&
+      params.minPrice > params.maxPrice
+    ) {
+      throw new BadRequestException('O preço mínimo não pode ser maior que o preço máximo.');
+    }
     const where: Prisma.ProductWhereInput = {
       type: ProductType.PRODUCT,
       status: ProductStatus.ACTIVE,
@@ -126,13 +139,13 @@ export class ProductsService {
     }
 
     if (params.condition) {
-      where.condition = params.condition as any;
+      where.condition = params.condition;
     }
 
-    if (params.minPrice || params.maxPrice) {
+    if (params.minPrice !== undefined || params.maxPrice !== undefined) {
       where.price = {};
-      if (params.minPrice) where.price.gte = params.minPrice;
-      if (params.maxPrice) where.price.lte = params.maxPrice;
+      if (params.minPrice !== undefined) where.price.gte = params.minPrice;
+      if (params.maxPrice !== undefined) where.price.lte = params.maxPrice;
     }
 
     let orderBy: Prisma.ProductOrderByWithRelationInput = { createdAt: 'desc' };
@@ -150,10 +163,13 @@ export class ProductsService {
         take: limit,
         orderBy,
         include: {
-          images: { orderBy: { position: 'asc' } },
+          images: {
+            orderBy: { position: 'asc' },
+            select: { id: true, url: true, position: true },
+          },
           category: true,
           seller: {
-            select: { id: true, name: true, avatarUrl: true, city: undefined as any },
+            select: { id: true, name: true, avatarUrl: true },
           },
         },
       }),
@@ -172,7 +188,10 @@ export class ProductsService {
     const product = await this.prisma.product.findUnique({
       where: { id },
       include: {
-        images: { orderBy: { position: 'asc' } },
+        images: {
+          orderBy: { position: 'asc' },
+          select: { id: true, url: true, position: true },
+        },
         category: true,
         seller: {
           select: {
@@ -187,7 +206,7 @@ export class ProductsService {
       },
     });
 
-    if (!product) {
+    if (!product || product.status === ProductStatus.ARCHIVED) {
       throw new NotFoundException('Anúncio não encontrado.');
     }
 
@@ -197,8 +216,12 @@ export class ProductsService {
   async update(userId: string, productId: string, dto: UpdateProductDto) {
     const product = await this.prisma.product.findUniqueOrThrow({
       where: { id: productId },
+      include: { images: { select: { fileId: true } } },
     });
 
+    if (product.status === ProductStatus.ARCHIVED) {
+      throw new NotFoundException('Anúncio não encontrado.');
+    }
     if (product.sellerId !== userId) {
       throw new ForbiddenException('Você não tem permissão para alterar este anúncio.');
     }
@@ -206,8 +229,9 @@ export class ProductsService {
     if (dto.images && dto.images.length > 5) {
       throw new BadRequestException('Cada anúncio pode ter no máximo 5 imagens.');
     }
+    if (dto.images) this.upload.assertManagedImages(dto.images);
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       if (dto.images) {
         await tx.productImage.deleteMany({ where: { productId } });
         await tx.productImage.createMany({
@@ -238,6 +262,15 @@ export class ProductsService {
         },
       });
     });
+
+    if (dto.images) {
+      const retained = new Set(dto.images.map((image) => image.fileId));
+      await this.upload.deleteFiles(
+        product.images.map((image) => image.fileId).filter((fileId) => !retained.has(fileId)),
+      );
+    }
+
+    return updated;
   }
 
   async updateStatus(userId: string, productId: string, status: ProductStatus) {
@@ -245,6 +278,9 @@ export class ProductsService {
       where: { id: productId },
     });
 
+    if (product.status === ProductStatus.ARCHIVED) {
+      throw new NotFoundException('Anúncio não encontrado.');
+    }
     if (product.sellerId !== userId) {
       throw new ForbiddenException('Você não tem permissão para alterar este anúncio.');
     }
@@ -260,11 +296,17 @@ export class ProductsService {
       where: { id: productId },
     });
 
+    if (product.status === ProductStatus.ARCHIVED) {
+      throw new NotFoundException('Anúncio não encontrado.');
+    }
     if (product.sellerId !== userId) {
       throw new ForbiddenException('Você não tem permissão para excluir este anúncio.');
     }
 
-    await this.prisma.product.delete({ where: { id: productId } });
+    await this.prisma.product.update({
+      where: { id: productId },
+      data: { status: ProductStatus.ARCHIVED, stock: 0 },
+    });
     return { success: true };
   }
 }

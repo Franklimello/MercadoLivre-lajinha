@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import {
   ConnectedSocket,
   MessageBody,
@@ -6,16 +7,19 @@ import {
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
+  WsException,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { Logger, UsePipes, ValidationPipe } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service.js';
 import { FirebaseAdminService } from '../firebase/firebase-admin.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { JoinNegotiationDto, SendMessageDto } from './dto/chat-message.dto.js';
 
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true,
   },
   namespace: '/chat',
 })
@@ -24,6 +28,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server!: Server;
 
   private readonly logger = new Logger(ChatGateway.name);
+  private readonly messageWindows = new Map<string, number[]>();
 
   constructor(
     private readonly chatService: ChatService,
@@ -63,13 +68,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleDisconnect(client: Socket) {
+    this.messageWindows.delete(client.id);
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
   @SubscribeMessage('joinNegotiation')
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async handleJoin(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { negotiationId: string },
+    @MessageBody() data: JoinNegotiationDto,
   ) {
     const user = client.data.user;
     if (!user || !data.negotiationId) return;
@@ -92,12 +99,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('sendMessage')
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      exceptionFactory: () => new WsException('Mensagem inválida.'),
+    }),
+  )
   async handleMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { negotiationId: string; content: string },
+    @MessageBody() data: SendMessageDto,
   ) {
     const user = client.data.user;
     if (!user || !data.negotiationId || !data.content?.trim()) return;
+
+    if (!this.consumeMessageQuota(client.id)) {
+      return { status: 'error', message: 'Muitas mensagens. Aguarde alguns segundos.' };
+    }
 
     try {
       // 1. Salva no banco e notifica push se necessário
@@ -112,9 +130,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(room).emit('newMessage', message);
 
       return { status: 'sent', messageId: message.id };
-    } catch (error: any) {
+    } catch (error) {
       this.logger.error('Error saving/broadcasting message', error);
-      return { status: 'error', message: error.message };
+      return { status: 'error', message: 'Não foi possível enviar a mensagem.' };
     }
+  }
+
+  private consumeMessageQuota(clientId: string) {
+    const now = Date.now();
+    const windowStart = now - 10_000;
+    const recent = (this.messageWindows.get(clientId) || []).filter(
+      (timestamp) => timestamp >= windowStart,
+    );
+    if (recent.length >= 20) return false;
+    recent.push(now);
+    this.messageWindows.set(clientId, recent);
+    return true;
   }
 }

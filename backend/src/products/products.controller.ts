@@ -14,6 +14,7 @@ import { FirebaseAuthGuard } from '../auth/firebase-auth.guard.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import {
   CreateProductDto,
+  ListProductsQueryDto,
   UpdateProductDto,
   UpdateProductStatusDto,
 } from './dto/product.dto.js';
@@ -29,25 +30,10 @@ export class ProductsController {
   }
 
   @Get()
-  findAll(
-    @Query('q') q?: string,
-    @Query('category') categorySlug?: string,
-    @Query('condition') condition?: string,
-    @Query('minPrice') minPrice?: number,
-    @Query('maxPrice') maxPrice?: number,
-    @Query('sort') sort?: 'newest' | 'price_asc' | 'price_desc',
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
-  ) {
+  findAll(@Query() query: ListProductsQueryDto) {
     return this.productsService.findAll({
-      q,
-      categorySlug,
-      condition,
-      minPrice: minPrice ? Number(minPrice) : undefined,
-      maxPrice: maxPrice ? Number(maxPrice) : undefined,
-      sort,
-      page: page ? Number(page) : undefined,
-      limit: limit ? Number(limit) : undefined,
+      ...query,
+      categorySlug: query.category,
     });
   }
 

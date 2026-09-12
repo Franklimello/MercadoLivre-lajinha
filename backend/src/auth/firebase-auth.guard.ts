@@ -22,31 +22,40 @@ export class FirebaseAuthGuard implements CanActivate {
       throw new UnauthorizedException('Token de autenticação não fornecido.');
     }
 
-    const token = authHeader.split('Bearer ')[1].trim();
+    const token = authHeader.slice('Bearer '.length).trim();
+    if (!token) {
+      throw new UnauthorizedException('Token de autenticação não fornecido.');
+    }
 
+    let decodedToken;
     try {
-      const decodedToken = await this.firebaseAdmin.verifyIdToken(token);
-      
-      // Upsert user in Postgres DB
-      const user = await this.prisma.user.upsert({
-        where: { firebaseUid: decodedToken.uid },
-        update: {
-          name: decodedToken.name || 'Usuário',
-          email: decodedToken.email || `${decodedToken.uid}@mercadolajinha.local`,
-          avatarUrl: decodedToken.picture || null,
-        },
-        create: {
-          firebaseUid: decodedToken.uid,
-          name: decodedToken.name || 'Usuário',
-          email: decodedToken.email || `${decodedToken.uid}@mercadolajinha.local`,
-          avatarUrl: decodedToken.picture || null,
-        },
-      });
-
-      request.user = user;
-      return true;
-    } catch (error) {
+      decodedToken = await this.firebaseAdmin.verifyIdToken(token);
+    } catch {
       throw new UnauthorizedException('Token inválido ou expirado.');
     }
+
+    const email = decodedToken.email?.trim().toLowerCase();
+    if (!email) {
+      throw new UnauthorizedException('A conta autenticada não possui e-mail.');
+    }
+
+    // Erros de banco devem continuar como falhas de infraestrutura, não como 401.
+    const user = await this.prisma.user.upsert({
+      where: { firebaseUid: decodedToken.uid },
+      update: {
+        name: decodedToken.name || 'Usuário',
+        email,
+        avatarUrl: decodedToken.picture || null,
+      },
+      create: {
+        firebaseUid: decodedToken.uid,
+        name: decodedToken.name || 'Usuário',
+        email,
+        avatarUrl: decodedToken.picture || null,
+      },
+    });
+
+    request.user = user;
+    return true;
   }
 }

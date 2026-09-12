@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsString, Matches } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 
 export class UpdateProfileDto {
   @IsOptional()
@@ -8,12 +8,11 @@ export class UpdateProfileDto {
   })
   whatsapp?: string;
 
-  @IsOptional()
-  @IsBoolean()
-  notificationsEnabled?: boolean;
 }
 
 export class RegisterFcmTokenDto {
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(4096)
   token!: string;
 }

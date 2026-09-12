@@ -22,7 +22,7 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
-    const data: any = {};
+    const data: { whatsapp?: string; whatsappVerified?: boolean } = {};
     if (dto.whatsapp !== undefined) {
       // Limpa caracteres especiais mantendo apenas dígitos e o sinal de + inicial se houver
       const cleaned = dto.whatsapp.replace(/[^0-9+]/g, '');
@@ -30,10 +30,8 @@ export class UsersService {
         throw new BadRequestException('WhatsApp deve conter DDD + número.');
       }
       data.whatsapp = cleaned;
-      data.whatsappVerified = true;
-    }
-    if (dto.notificationsEnabled !== undefined) {
-      data.notificationsEnabled = dto.notificationsEnabled;
+      // O número só pode ser marcado como verificado após um desafio real.
+      data.whatsappVerified = false;
     }
 
     return this.prisma.user.update({

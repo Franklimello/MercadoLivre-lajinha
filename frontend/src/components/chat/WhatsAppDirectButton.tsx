@@ -1,44 +1,33 @@
-'use client';
-
-import React from 'react';
-import { buttonVariants } from '@/components/ui/button';
-import { MessageCircle } from 'lucide-react';
-
-interface WhatsAppDirectButtonProps {
-  phone: string;
-  sellerName: string;
-  productTitle: string;
-  className?: string;
-}
-
+import { MessageCircle } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
+import { phoneDigits } from "@/lib/marketplace";
 export function WhatsAppDirectButton({
   phone,
   sellerName,
   productTitle,
-  className = '',
-}: WhatsAppDirectButtonProps) {
+  className = "",
+}: {
+  phone: string;
+  sellerName: string;
+  productTitle: string;
+  className?: string;
+}) {
   if (!phone) return null;
-
-  const cleanedPhone = phone.replace(/[^0-9]/g, '');
-  const finalPhone = cleanedPhone.startsWith('55') ? cleanedPhone : `55${cleanedPhone}`;
-
+  const digits = phoneDigits(phone);
+  const fullPhone =
+    digits.length > 11 && digits.startsWith("55") ? digits : "55" + digits;
   const message = encodeURIComponent(
-    `Olá ${sellerName}! Vi seu anúncio "${productTitle}" no Mercado Lajinha e tenho interesse em negociar com você.`
+    `Olá, ${sellerName}! Vi seu anúncio “${productTitle}” no Mercado Livre Lajinha e tenho interesse.`,
   );
-
-  const whatsappUrl = `https://api.whatsapp.com/send?phone=${finalPhone}&text=${message}`;
-
   return (
     <a
-      href={whatsappUrl}
+      href={`https://api.whatsapp.com/send?phone=${fullPhone}&text=${message}`}
       target="_blank"
       rel="noopener noreferrer"
-      className={buttonVariants({
-        className: `bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 shadow-xs transition-colors ${className}`,
-      })}
+      className={buttonVariants({ variant: "outline", size: "sm", className })}
     >
-      <MessageCircle className="h-5 w-5" />
-      Conversar no WhatsApp
+      <MessageCircle />
+      WhatsApp<span className="sr-only"> (abre em outra aba)</span>
     </a>
   );
 }

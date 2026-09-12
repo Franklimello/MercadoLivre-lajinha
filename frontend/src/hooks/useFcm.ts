@@ -1,63 +1,62 @@
-'use client';
-
-import { useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import { apiFetch } from '@/lib/api';
-import { toast } from 'sonner';
-
+"use client";
+import { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { app } from "@/lib/firebase";
+import { registerMarketplaceWorker } from "@/lib/pwa";
+import { apiFetch } from "@/lib/api";
+import { toast } from "sonner";
 export function useFcm() {
   const { user, refreshProfile } = useAuth();
   const [loading, setLoading] = useState(false);
-
-  const requestPermissionAndRegister = async (): Promise<boolean> => {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      toast.error('Seu navegador não suporta notificações.');
+  async function requestPermissionAndRegister(): Promise<boolean> {
+    if (
+      !user ||
+      typeof window === "undefined" ||
+      !("Notification" in window) ||
+      !("serviceWorker" in navigator)
+    ) {
+      toast.error(
+        "Este navegador não permite ativar notificações. Tente em outro navegador.",
+      );
       return false;
     }
-
     setLoading(true);
     try {
-      const permission = await Notification.requestPermission();
-
-      if (permission === 'granted') {
-        let token = '';
-
-        try {
-          if ('serviceWorker' in navigator) {
-            const registration = await navigator.serviceWorker.register(
-              '/firebase-messaging-sw.js'
-            );
-            console.log('Service Worker registrado:', registration.scope);
-          }
-        } catch (swErr) {
-          console.warn('Service Worker não registrado:', swErr);
-        }
-
-        // Token para vincular os dispositivos do usuário
-        token = `fcm-token-${user?.id || 'client'}-${Date.now()}`;
-
-        // Registra o token no backend
-        await apiFetch('/users/fcm-token', {
-          method: 'POST',
-          body: JSON.stringify({ token }),
-        });
-
-        await refreshProfile();
-        toast.success('Notificações ativadas com sucesso!');
-        return true;
-      } else {
-        toast.warning('Permissão de notificações não foi concedida.');
+      const { getMessaging, getToken, isSupported } =
+        await import("firebase/messaging");
+      if (!(await isSupported())) {
+        toast.error("Notificações não estão disponíveis neste navegador.");
         return false;
       }
-    } catch (error: any) {
-      console.error('Erro ao ativar notificações:', error);
-      toast.error(error.message || 'Erro ao registrar notificações.');
+      if ((await Notification.requestPermission()) !== "granted") {
+        toast.error(
+          "Permita notificações nas configurações do navegador e tente novamente.",
+        );
+        return false;
+      }
+      const registration = await registerMarketplaceWorker();
+      const ready = await navigator.serviceWorker.ready;
+      const token = await getToken(getMessaging(app), {
+        vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY || undefined,
+        serviceWorkerRegistration: registration.active ? registration : ready,
+      });
+      if (!token) throw new Error("Token unavailable");
+      await apiFetch("/users/fcm-token", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      });
+      await refreshProfile();
+      toast.success("Notificações ativadas neste dispositivo.");
+      return true;
+    } catch {
+      toast.error(
+        "Não foi possível ativar as notificações. Confira sua conexão e tente novamente.",
+      );
       return false;
     } finally {
       setLoading(false);
     }
-  };
-
+  }
   return {
     notificationsEnabled: user?.notificationsEnabled ?? false,
     requestPermissionAndRegister,

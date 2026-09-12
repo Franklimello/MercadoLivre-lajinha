@@ -7,21 +7,26 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateVehicleDto, UpdateVehicleDto } from './dto/vehicle.dto.js';
 import { ProductStatus, ProductType, VehicleType, Prisma } from '@prisma/client';
+import { UploadService } from '../upload/upload.service.js';
 
 @Injectable()
 export class VehiclesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly upload: UploadService,
+  ) {}
 
   async create(userId: string, dto: CreateVehicleDto) {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
+      include: { _count: { select: { fcmTokens: true } } },
     });
 
     if (!user.whatsapp) {
       throw new BadRequestException('É obrigatório cadastrar o seu WhatsApp antes de publicar.');
     }
 
-    if (!user.notificationsEnabled) {
+    if (!user.notificationsEnabled || user._count.fcmTokens === 0) {
       throw new BadRequestException('É obrigatório ativar as notificações push antes de publicar.');
     }
 
@@ -32,6 +37,7 @@ export class VehiclesService {
     if (dto.images.length > 5) {
       throw new BadRequestException('Cada anúncio pode ter no máximo 5 imagens.');
     }
+    this.upload.assertManagedImages(dto.images);
 
     return this.prisma.product.create({
       data: {
@@ -96,6 +102,21 @@ export class VehiclesService {
     const limit = Math.min(50, Math.max(1, Number(params.limit) || 12));
     const skip = (page - 1) * limit;
 
+    if (
+      params.minPrice !== undefined &&
+      params.maxPrice !== undefined &&
+      params.minPrice > params.maxPrice
+    ) {
+      throw new BadRequestException('O preço mínimo não pode ser maior que o preço máximo.');
+    }
+    if (
+      params.minYear !== undefined &&
+      params.maxYear !== undefined &&
+      params.minYear > params.maxYear
+    ) {
+      throw new BadRequestException('O ano mínimo não pode ser maior que o ano máximo.');
+    }
+
     const where: Prisma.ProductWhereInput = {
       type: ProductType.VEHICLE,
       status: ProductStatus.ACTIVE,
@@ -144,10 +165,10 @@ export class VehiclesService {
       where.vehicle = vehicleFilter;
     }
 
-    if (params.minPrice || params.maxPrice) {
+    if (params.minPrice !== undefined || params.maxPrice !== undefined) {
       where.price = {};
-      if (params.minPrice) where.price.gte = params.minPrice;
-      if (params.maxPrice) where.price.lte = params.maxPrice;
+      if (params.minPrice !== undefined) where.price.gte = params.minPrice;
+      if (params.maxPrice !== undefined) where.price.lte = params.maxPrice;
     }
 
     let orderBy: Prisma.ProductOrderByWithRelationInput = { createdAt: 'desc' };
@@ -165,7 +186,10 @@ export class VehiclesService {
         take: limit,
         orderBy,
         include: {
-          images: { orderBy: { position: 'asc' } },
+          images: {
+            orderBy: { position: 'asc' },
+            select: { id: true, url: true, position: true },
+          },
           vehicle: true,
           seller: {
             select: { id: true, name: true, avatarUrl: true },
@@ -187,7 +211,10 @@ export class VehiclesService {
     const product = await this.prisma.product.findUnique({
       where: { id },
       include: {
-        images: { orderBy: { position: 'asc' } },
+        images: {
+          orderBy: { position: 'asc' },
+          select: { id: true, url: true, position: true },
+        },
         vehicle: true,
         category: true,
         seller: {
@@ -211,11 +238,116 @@ export class VehiclesService {
 
   async getBrands(vehicleType?: VehicleType) {
     const vehicles = await this.prisma.vehicle.findMany({
-      where: vehicleType ? { vehicleType } : {},
+      where: {
+        ...(vehicleType ? { vehicleType } : {}),
+        product: { status: ProductStatus.ACTIVE, stock: { gt: 0 } },
+      },
       select: { brand: true },
       distinct: ['brand'],
       orderBy: { brand: 'asc' },
     });
     return vehicles.map((v) => v.brand);
+  }
+
+  async update(userId: string, productId: string, dto: UpdateVehicleDto) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: {
+        sellerId: true,
+        type: true,
+        status: true,
+        images: { select: { fileId: true } },
+      },
+    });
+
+    if (!product || product.type !== ProductType.VEHICLE || product.status === ProductStatus.ARCHIVED) {
+      throw new NotFoundException('Veículo não encontrado.');
+    }
+    if (product.sellerId !== userId) {
+      throw new ForbiddenException('Você não tem permissão para alterar este veículo.');
+    }
+    if (dto.images) this.upload.assertManagedImages(dto.images);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (dto.images) {
+        await tx.productImage.deleteMany({ where: { productId } });
+        await tx.productImage.createMany({
+          data: dto.images.map((image, position) => ({
+            productId,
+            url: image.url,
+            fileId: image.fileId,
+            position,
+          })),
+        });
+      }
+
+      await tx.product.update({
+        where: { id: productId },
+        data: {
+          title: dto.title,
+          description: dto.description,
+          price: dto.price,
+          condition: dto.condition,
+          categoryId: dto.categoryId,
+          city: dto.city,
+          state: dto.state,
+        },
+      });
+
+      await tx.vehicle.update({
+        where: { productId },
+        data: {
+          vehicleType: dto.vehicleType,
+          brand: dto.brand,
+          model: dto.model,
+          year: dto.year,
+          mileage: dto.mileage,
+          color: dto.color,
+          fuel: dto.fuel,
+          transmission: dto.transmission,
+          engine: dto.engine,
+          bodyType: dto.bodyType,
+          plateEnd: dto.plateEnd,
+        },
+      });
+
+      return tx.product.findUnique({
+        where: { id: productId },
+        include: {
+          images: { orderBy: { position: 'asc' } },
+          category: true,
+          vehicle: true,
+        },
+      });
+    });
+
+    if (dto.images) {
+      const retained = new Set(dto.images.map((image) => image.fileId));
+      await this.upload.deleteFiles(
+        product.images.map((image) => image.fileId).filter((fileId) => !retained.has(fileId)),
+      );
+    }
+
+    return updated;
+  }
+
+  async delete(userId: string, productId: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { sellerId: true, type: true, status: true },
+    });
+
+    if (!product || product.type !== ProductType.VEHICLE || product.status === ProductStatus.ARCHIVED) {
+      throw new NotFoundException('Veículo não encontrado.');
+    }
+    if (product.sellerId !== userId) {
+      throw new ForbiddenException('Você não tem permissão para excluir este veículo.');
+    }
+
+    await this.prisma.product.update({
+      where: { id: productId },
+      data: { status: ProductStatus.ARCHIVED, stock: 0 },
+    });
+    return { success: true };
   }
 }

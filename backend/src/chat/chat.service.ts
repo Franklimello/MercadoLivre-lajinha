@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -36,15 +37,18 @@ export class ChatService {
       data: { readAt: new Date() },
     });
 
-    return this.prisma.message.findMany({
+    const messages = await this.prisma.message.findMany({
       where: { negotiationId },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
       include: {
         sender: {
           select: { id: true, name: true, avatarUrl: true },
         },
       },
     });
+
+    return messages.reverse();
   }
 
   async saveAndNotifyMessage(
@@ -52,6 +56,11 @@ export class ChatService {
     negotiationId: string,
     content: string,
   ) {
+    const normalizedContent = content.trim();
+    if (!normalizedContent || normalizedContent.length > 2000) {
+      throw new BadRequestException('Mensagem inválida.');
+    }
+
     const negotiation = await this.prisma.negotiation.findUnique({
       where: { id: negotiationId },
       include: {
@@ -74,7 +83,7 @@ export class ChatService {
       data: {
         negotiationId,
         senderId,
-        content,
+        content: normalizedContent,
       },
       include: {
         sender: {
@@ -101,7 +110,13 @@ export class ChatService {
         : negotiation.seller.name;
 
     // Dispara notificação push em segundo plano se houver tokens FCM
-    this.sendPushToRecipient(recipientId, senderName, content, negotiationId, negotiation.product.title);
+    void this.sendPushToRecipient(
+      recipientId,
+      senderName,
+      normalizedContent,
+      negotiationId,
+      negotiation.product.title,
+    );
 
     return message;
   }
@@ -121,12 +136,26 @@ export class ChatService {
 
       if (tokens.length > 0) {
         const tokenList = tokens.map((t) => t.token);
-        await this.firebaseAdmin.sendPushNotification(
+        const invalidTokens = await this.firebaseAdmin.sendPushNotification(
           tokenList,
           `Nova mensagem de ${senderName}`,
           `${productTitle}: ${content.slice(0, 80)}`,
           { negotiationId, type: 'CHAT_MESSAGE' },
         );
+        if (invalidTokens.length > 0) {
+          await this.prisma.fcmToken.deleteMany({
+            where: { token: { in: invalidTokens } },
+          });
+          const remaining = await this.prisma.fcmToken.count({
+            where: { userId: recipientId },
+          });
+          if (remaining === 0) {
+            await this.prisma.user.update({
+              where: { id: recipientId },
+              data: { notificationsEnabled: false },
+            });
+          }
+        }
       }
     } catch (e) {
       console.error('Erro ao enviar push notification:', e);

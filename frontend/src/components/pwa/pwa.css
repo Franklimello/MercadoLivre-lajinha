@@ -1,0 +1,130 @@
+.connection-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px max(16px, env(safe-area-inset-left));
+  background: #faf3e3;
+  border-bottom: 1px solid #e9dcc0;
+  color: #70582f;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.connection-notice > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.pwa-install.shell {
+  width: min(calc(100% - 32px), 1200px);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-block: 16px;
+  padding: 16px;
+  background: #f2f6ee;
+  border: 1px solid #dce6d5;
+  border-radius: 14px;
+}
+.pwa-install strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 550;
+}
+.pwa-install p {
+  color: #647067;
+  font-size: 11px;
+  margin-top: 3px;
+}
+.pwa-install > img {
+  flex-shrink: 0;
+}
+.pwa-install-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  background: #246044;
+  border-radius: 8px;
+  color: #fff;
+  padding: 10px 15px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.pwa-install-button:hover {
+  background: #194d34;
+}
+.pwa-install-button:disabled {
+  opacity: 0.65;
+}
+.pwa-install > .icon-button {
+  flex-shrink: 0;
+}
+.draft-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #647067;
+  margin-block: 10px;
+}
+.draft-recovery {
+  padding: 18px;
+  border: 1px solid #dce6d5;
+  border-radius: 12px;
+  background: #f2f6ee;
+  margin-block: 18px;
+}
+.draft-recovery strong {
+  font-weight: 550;
+}
+.draft-recovery p {
+  font-size: 12px;
+  color: #647067;
+  margin-block: 5px 14px;
+}
+.draft-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+@media (max-width: 639px) {
+  .pwa-install.shell {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) 28px;
+    gap: 12px;
+  }
+  .pwa-install-button {
+    grid-column: 2;
+    grid-row: 2;
+    margin-left: 0;
+    justify-self: start;
+  }
+  .pwa-install > .icon-button {
+    grid-column: 3;
+    grid-row: 1;
+    width: 28px;
+    height: 36px;
+  }
+}
+@media (display-mode: standalone) {
+  .pwa-install {
+    display: none !important;
+  }
+  .bottom-nav {
+    padding-left: max(4px, env(safe-area-inset-left));
+    padding-right: max(4px, env(safe-area-inset-right));
+  }
+  .auth-page {
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
+  }
+  .site-body .site-header {
+    top: calc(env(safe-area-inset-top, 0px) - 68px);
+  }
+}
+@media (display-mode: standalone) and (min-width: 1024px) {
+  .site-body .site-header {
+    top: env(safe-area-inset-top, 0px);
+  }
+}

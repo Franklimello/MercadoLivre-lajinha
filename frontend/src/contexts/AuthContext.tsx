@@ -1,14 +1,22 @@
-'use client';
+"use client";
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+} from "react";
 import {
   signInWithPopup,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   type User as FirebaseUser,
-} from 'firebase/auth';
-import { auth, googleProvider } from '@/lib/firebase';
-import { apiFetch } from '@/lib/api';
+} from "firebase/auth";
+import { auth, googleProvider } from "@/lib/firebase";
+import { apiFetch } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 
 export interface UserProfile {
   id: string;
@@ -31,34 +39,59 @@ interface AuthContextType {
   user: UserProfile | null;
   firebaseUser: FirebaseUser | null;
   loading: boolean;
+  profileError: string | null;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
-  updateProfile: (data: { whatsapp?: string; notificationsEnabled?: boolean }) => Promise<void>;
+  updateProfile: (data: { whatsapp?: string }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
+    const uid = auth.currentUser?.uid;
     try {
-      const profile = await apiFetch<UserProfile>('/users/me');
+      if (!uid) throw new Error("Session unavailable");
+      const profile = await queryClient.fetchQuery({
+        queryKey: queryKeys.profile(uid),
+        queryFn: ({ signal }) => apiFetch<UserProfile>("/users/me", { signal }),
+        staleTime: 0,
+        gcTime: 60_000,
+      });
+      if (auth.currentUser?.uid !== uid) throw new Error("Session changed");
       setUser(profile);
+      setProfileError(null);
     } catch (error) {
-      console.error('Erro ao carregar perfil do backend:', error);
+      if (auth.currentUser?.uid !== uid) throw error;
+      console.error("Erro ao carregar perfil do backend:", error);
       setUser(null);
+      setProfileError(
+        "Você entrou com o Google, mas não foi possível carregar sua conta. Tente novamente.",
+      );
+      throw error;
     }
-  };
+  }, [queryClient]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.private });
+      queryClient.removeQueries({ queryKey: queryKeys.private });
+      setUser(null);
+      setProfileError(null);
       setFirebaseUser(fbUser);
       if (fbUser) {
-        await fetchProfile();
+        try {
+          await fetchProfile();
+        } catch {
+          /* The profile error is displayed by LoginPanel. */
+        }
       } else {
         setUser(null);
       }
@@ -66,7 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [queryClient, fetchProfile]);
 
   const signInWithGoogle = async () => {
     setLoading(true);
@@ -74,7 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await signInWithPopup(auth, googleProvider);
       await fetchProfile();
     } catch (error) {
-      console.error('Erro no login Google:', error);
+      console.error("Erro no login Google:", error);
       throw error;
     } finally {
       setLoading(false);
@@ -85,8 +118,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     try {
       await firebaseSignOut(auth);
+      await queryClient.cancelQueries({ queryKey: queryKeys.private });
+      queryClient.removeQueries({ queryKey: queryKeys.private });
       setUser(null);
       setFirebaseUser(null);
+      setProfileError(null);
     } finally {
       setLoading(false);
     }
@@ -98,12 +134,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const updateProfile = async (data: { whatsapp?: string; notificationsEnabled?: boolean }) => {
-    const updated = await apiFetch<UserProfile>('/users/me', {
-      method: 'PATCH',
+  const updateProfile = async (data: { whatsapp?: string }) => {
+    const updated = await apiFetch<UserProfile>("/users/me", {
+      method: "PATCH",
       body: JSON.stringify(data),
     });
     setUser(updated);
+    if (auth.currentUser)
+      queryClient.setQueryData(
+        queryKeys.profile(auth.currentUser.uid),
+        updated,
+      );
   };
 
   return (
@@ -112,6 +153,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         firebaseUser,
         loading,
+        profileError,
         signInWithGoogle,
         signOut,
         refreshProfile,
