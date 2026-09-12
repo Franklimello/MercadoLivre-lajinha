@@ -5,12 +5,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { CreateNegotiationDto, UpdateNegotiationStatusDto } from './dto/negotiation.dto.js';
 import { NegotiationStatus, ProductStatus } from '@prisma/client';
 
 @Injectable()
 export class NegotiationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   async findOrCreate(buyerId: string, dto: CreateNegotiationDto) {
     const product = await this.prisma.product.findUnique({
@@ -49,6 +53,16 @@ export class NegotiationsService {
           status: NegotiationStatus.OPEN,
         },
       });
+
+      const buyer = await this.prisma.user.findUnique({ where: { id: buyerId } });
+      if (buyer) {
+        this.notificationsService.notifyNewNegotiation(
+          product.sellerId,
+          buyer.name,
+          product.title,
+          negotiation.id,
+        );
+      }
     }
 
     return negotiation;

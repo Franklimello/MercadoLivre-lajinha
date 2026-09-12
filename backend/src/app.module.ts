@@ -10,12 +10,14 @@ import { ProductsModule } from './products/products.module.js';
 import { VehiclesModule } from './vehicles/vehicles.module.js';
 import { NegotiationsModule } from './negotiations/negotiations.module.js';
 import { ChatModule } from './chat/chat.module.js';
+import { NotificationsModule } from './notifications/notifications.module.js';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     FirebaseAdminModule,
+    NotificationsModule,
     UsersModule,
     UploadModule,
     ProductsModule,
